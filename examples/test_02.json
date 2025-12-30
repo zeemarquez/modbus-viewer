@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "connection": {
+    "port": "COM10",
+    "slave_id": 1,
+    "baud_rate": 230400,
+    "parity": "N",
+    "stop_bits": 1,
+    "timeout": 1.0
+  },
+  "registers": [
+    {
+      "address": 0,
+      "size": 1,
+      "label": "STATUS",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 1,
+      "size": 4,
+      "label": "CHIP_ID",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 25,
+      "size": 1,
+      "label": "SCALE CH1",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 30,
+      "size": 2,
+      "label": "TIMESTAMP",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 32,
+      "size": 2,
+      "label": "CH1 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 34,
+      "size": 2,
+      "label": "CH2 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 36,
+      "size": 2,
+      "label": "CH3 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 38,
+      "size": 2,
+      "label": "CH4 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    }
+  ],
+  "variables": [
+    {
+      "name": "ch1",
+      "label": "CH1",
+      "expression": "R32/R25",
+      "format": "decimal"
+    },
+    {
+      "name": "ch2",
+      "label": "CH2",
+      "expression": "R34/R25",
+      "format": "decimal"
+    },
+    {
+      "name": "ch3",
+      "label": "CH3",
+      "expression": "R36/R25",
+      "format": "decimal"
+    },
+    {
+      "name": "ch4",
+      "label": "CH4",
+      "expression": "R38/R25",
+      "format": "decimal"
+    },
+    {
+      "name": "bit_status_0",
+      "label": "SYSTEM ERROR",
+      "expression": "BIT(R0, 0)",
+      "format": "boolean"
+    }
+  ],
+  "views": {
+    "plot_registers": [],
+    "plot_variables": [
+      "ch1",
+      "ch2",
+      "ch3",
+      "ch4"
+    ],
+    "plot_time_window": 60,
+    "poll_interval": 10,
+    "plot_options": {
+      "line_width": 1.0,
+      "grid_alpha": 0.1,
+      "show_legend": true,
+      "time_window_index": 0
+    }
+  },
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAGWAAADivwCAAAAAfsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawEAAABSAAADigAAAeQA////AAAAAQAABeIAAAOK/AIAAAAB/AAAAFIAAAOKAAABAAD////8AQAAAAr8AAAFcAAAAhAAAAAAAP////wCAAAAAPwAAAT1AAACiwAAAAAA/////AIAAAAA/AAABVYAAAIqAAAAAAD////8AgAAAAD8AAAE4gAAAp4AAAAAAP////wCAAAAAPwAAATAAAACwAAAAAAA/////AIAAAAA/AAABbsAAAHFAAAAAAD////8AgAAAAD8AAAFvAAAAcQAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA+wAAABAAUABsAG8AdABEAG8AYwBrAQAAAZ4AAAO4AAABfwD////8AAAFWgAAAiYAAADYAP////wCAAAAAvsAAAAaAFIAZQBnAGkAcwB0AGUAcgBzAEQAbwBjAGsBAAAAUgAAAY0AAAB+AP////sAAAAaAFYAYQByAGkAYQBiAGwAZQBzAEQAbwBjAGsBAAAB4wAAAfkAAAB+AP///wAAAAAAAAOKAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAWAE0AYQBpAG4AVABvAG8AbABiAGEAcgEAAAAA/////wAAAAAAAAAA"
+}

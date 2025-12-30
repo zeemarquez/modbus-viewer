@@ -1,0 +1,79 @@
+{
+  "version": "1.0",
+  "connection": {
+    "port": "COM10",
+    "slave_id": 1,
+    "baud_rate": 230400,
+    "parity": "N",
+    "stop_bits": 1,
+    "timeout": 1.0
+  },
+  "registers": [
+    {
+      "address": 0,
+      "size": 1,
+      "label": "STATUS",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 1,
+      "size": 4,
+      "label": "CHIP_ID",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 25,
+      "size": 1,
+      "label": "SCALE CH1",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 30,
+      "size": 2,
+      "label": "TIMESTAMP",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 32,
+      "size": 2,
+      "label": "CH1 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal"
+    }
+  ],
+  "variables": [
+    {
+      "name": "ch1_scale",
+      "label": "CH1",
+      "expression": "R32/R25",
+      "format": "decimal"
+    }
+  ],
+  "views": {
+    "plot_registers": [],
+    "plot_variables": [],
+    "plot_time_window": 60,
+    "poll_interval": 10,
+    "plot_options": {
+      "line_width": 2.0,
+      "grid_alpha": 0.1,
+      "show_legend": true,
+      "time_window_index": 2
+    }
+  },
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAGUAAADiPwCAAAAAfv/////AQAAAFIAAAOIAAAB/QD///8AAAABAAAF5AAAA4j8AgAAAAH8AAAAUgAAA4gAAAD8AP////wBAAAAB/wAAAVwAAACEAAAAAAA/////AIAAAAA/AAABPUAAAKLAAAAAAD////8AgAAAAD8AAAFVgAAAioAAAAAAP////wCAAAAAPwAAATiAAACngAAAAAA/////AIAAAAA/AAABMAAAALAAAAAAAD////8AgAAAAD7/////wEAAAGcAAAEGwAAAawA/////AAABbsAAAHFAAAA1gD////8AgAAAAL7/////wEAAABSAAACLAAAAHwA////+/////8BAAACggAAAVgAAAB8AP///wAAAAAAAAOIAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAH/////AQAAAAD/////AAAAAAAAAAA="
+}

@@ -1,0 +1,192 @@
+{
+  "version": "1.0",
+  "connection": {
+    "port": "COM11",
+    "slave_id": 1,
+    "baud_rate": 230400,
+    "parity": "N",
+    "stop_bits": 1,
+    "timeout": 1.0
+  },
+  "registers": [
+    {
+      "address": 0,
+      "size": 1,
+      "label": "Status",
+      "data_type": "uint16",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "hex"
+    },
+    {
+      "address": 1,
+      "size": 4,
+      "label": "Chip ID",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "hex"
+    },
+    {
+      "address": 5,
+      "size": 1,
+      "label": "FW Version",
+      "data_type": "uint16",
+      "byte_order": "big",
+      "expression": "value / 100",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 6,
+      "size": 1,
+      "label": "Config",
+      "data_type": "uint16",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read_write",
+      "display_format": "binary"
+    },
+    {
+      "address": 10,
+      "size": 2,
+      "label": "Cal CH1 0",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read_write",
+      "display_format": "decimal"
+    },
+    {
+      "address": 12,
+      "size": 2,
+      "label": "Cal CH1 100",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read_write",
+      "display_format": "decimal"
+    },
+    {
+      "address": 14,
+      "size": 2,
+      "label": "Cal CH2 0",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read_write",
+      "display_format": "decimal"
+    },
+    {
+      "address": 16,
+      "size": 2,
+      "label": "Cal CH2 100",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read_write",
+      "display_format": "decimal"
+    },
+    {
+      "address": 30,
+      "size": 2,
+      "label": "Timestamp",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 32,
+      "size": 2,
+      "label": "CH1 Raw",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 34,
+      "size": 2,
+      "label": "CH2 Raw",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 36,
+      "size": 2,
+      "label": "CH3 Raw",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 38,
+      "size": 2,
+      "label": "CH4 Raw",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 40,
+      "size": 2,
+      "label": "CH1 Level",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value / 100",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 42,
+      "size": 2,
+      "label": "CH2 Level",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value / 100",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 44,
+      "size": 2,
+      "label": "CH3 Level",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value / 100",
+      "access_mode": "read",
+      "display_format": "decimal"
+    },
+    {
+      "address": 46,
+      "size": 2,
+      "label": "CH4 Level",
+      "data_type": "uint32",
+      "byte_order": "big",
+      "expression": "value / 100",
+      "access_mode": "read",
+      "display_format": "decimal"
+    }
+  ],
+  "views": {
+    "plot_registers": [40, 42, 44, 46],
+    "plot_time_window": 60,
+    "poll_interval": 100
+  }
+}
+
+
+
+
