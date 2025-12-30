@@ -6,15 +6,17 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QStatusBar, QMenuBar, QMenu, QDockWidget,
-    QFileDialog, QMessageBox, QLabel, QApplication
+    QFileDialog, QMessageBox, QLabel, QApplication,
+    QComboBox, QSpinBox, QToolButton, QWidgetAction,
+    QFormLayout
 )
-from PySide6.QtCore import Qt, QSettings, QTimer, QByteArray
+from PySide6.QtCore import Qt, QSettings, QTimer, QByteArray, Signal
 from PySide6.QtGui import QAction, QKeySequence, QIcon
 
-from src.models.project import Project
+from src.models.project import Project, ConnectionSettings
 from src.core.modbus_manager import ModbusManager
 from src.core.data_engine import DataEngine
-from src.ui.connection_panel import ConnectionPanel
+from src.utils.serial_ports import get_available_ports
 from src.ui.table_view import TableView
 from src.ui.plot_view import PlotView
 from src.ui.variables_panel import VariablesPanel
@@ -59,6 +61,9 @@ class MainWindow(QMainWindow):
         
         # Restore window state
         self._load_settings()
+        
+        # Refresh ports initially
+        self._refresh_ports()
         
         # Load initial project if specified
         if initial_project_path:
@@ -144,26 +149,135 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         
+        # Port Selection
+        toolbar.addWidget(QLabel(" Port: "))
+        self.port_combo = QComboBox()
+        self.port_combo.setMinimumWidth(150)
+        toolbar.addWidget(self.port_combo)
+        
+        self.refresh_ports_action = QAction("↻", self)
+        self.refresh_ports_action.setToolTip("Refresh COM ports")
+        self.refresh_ports_action.triggered.connect(self._refresh_ports)
+        toolbar.addAction(self.refresh_ports_action)
+        
+        toolbar.addSeparator()
+        
+        # Slave ID
+        toolbar.addWidget(QLabel(" Slave ID: "))
+        self.slave_spin = QSpinBox()
+        self.slave_spin.setRange(1, 247)
+        self.slave_spin.setValue(1)
+        self.slave_spin.setFixedWidth(60)
+        toolbar.addWidget(self.slave_spin)
+        
+        toolbar.addSeparator()
+        
+        # Advanced Menu
+        self.advanced_btn = QToolButton()
+        self.advanced_btn.setText("Advanced")
+        self.advanced_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.advanced_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        
+        advanced_menu = QMenu(self)
+        
+        # Baud Rate
+        baud_widget = QWidget()
+        baud_layout = QHBoxLayout(baud_widget)
+        baud_layout.setContentsMargins(10, 5, 10, 5)
+        baud_layout.addWidget(QLabel("Baud Rate:"))
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400", "460800"])
+        self.baud_combo.setCurrentText("9600")
+        baud_layout.addWidget(self.baud_combo)
+        
+        baud_action = QWidgetAction(self)
+        baud_action.setDefaultWidget(baud_widget)
+        advanced_menu.addAction(baud_action)
+        
+        # Parity
+        parity_widget = QWidget()
+        parity_layout = QHBoxLayout(parity_widget)
+        parity_layout.setContentsMargins(10, 5, 10, 5)
+        parity_layout.addWidget(QLabel("Parity:"))
+        self.parity_combo = QComboBox()
+        self.parity_combo.addItems(["None", "Even", "Odd"])
+        parity_layout.addWidget(self.parity_combo)
+        
+        parity_action = QWidgetAction(self)
+        parity_action.setDefaultWidget(parity_widget)
+        advanced_menu.addAction(parity_action)
+        
+        # Stop Bits
+        stop_widget = QWidget()
+        stop_layout = QHBoxLayout(stop_widget)
+        stop_layout.setContentsMargins(10, 5, 10, 5)
+        stop_layout.addWidget(QLabel("Stop Bits:"))
+        self.stopbits_combo = QComboBox()
+        self.stopbits_combo.addItems(["1", "2"])
+        stop_layout.addWidget(self.stopbits_combo)
+        
+        stop_action = QWidgetAction(self)
+        stop_action.setDefaultWidget(stop_widget)
+        advanced_menu.addAction(stop_action)
+        
+        # Timeout
+        timeout_widget = QWidget()
+        timeout_layout = QHBoxLayout(timeout_widget)
+        timeout_layout.setContentsMargins(10, 5, 10, 5)
+        timeout_layout.addWidget(QLabel("Timeout (ms):"))
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(100, 10000)
+        self.timeout_spin.setValue(1000)
+        self.timeout_spin.setSingleStep(100)
+        timeout_layout.addWidget(self.timeout_spin)
+        
+        timeout_action = QWidgetAction(self)
+        timeout_action.setDefaultWidget(timeout_widget)
+        advanced_menu.addAction(timeout_action)
+        
+        advanced_menu.addSeparator()
+        
+        # Polling Interval
+        poll_widget = QWidget()
+        poll_layout = QHBoxLayout(poll_widget)
+        poll_layout.setContentsMargins(10, 5, 10, 5)
+        poll_layout.addWidget(QLabel("Poll Interval (ms):"))
+        self.poll_combo = QComboBox()
+        self.poll_combo.addItems(["1", "10", "50", "100", "200", "500", "1000", "2000"])
+        self.poll_combo.setCurrentText("100")
+        self.poll_combo.currentTextChanged.connect(self._on_poll_interval_text_changed)
+        poll_layout.addWidget(self.poll_combo)
+        
+        poll_action = QWidgetAction(self)
+        poll_action.setDefaultWidget(poll_widget)
+        advanced_menu.addAction(poll_action)
+        
+        self.advanced_btn.setMenu(advanced_menu)
+        toolbar.addWidget(self.advanced_btn)
+
+        toolbar.addSeparator()
+        
         # Connect button
         self.connect_action = QAction("Connect", self)
         self.connect_action.setCheckable(True)
         self.connect_action.triggered.connect(self._toggle_connection)
         toolbar.addAction(self.connect_action)
+
+    def _refresh_ports(self) -> None:
+        """Refresh available COM ports."""
+        current = self.port_combo.currentData()
+        self.port_combo.clear()
         
-        toolbar.addSeparator()
+        ports = get_available_ports()
+        for port, description in ports:
+            self.port_combo.addItem(f"{port} - {description}", port)
         
-        # Start/Stop button
-        self.start_action = QAction("Start", self)
-        self.start_action.setCheckable(True)
-        self.start_action.setEnabled(False)
-        self.start_action.triggered.connect(self._toggle_polling)
-        toolbar.addAction(self.start_action)
-        
-        # Clear button
-        clear_action = QAction("Clear", self)
-        clear_action.triggered.connect(self._clear_data)
-        toolbar.addAction(clear_action)
-    
+        # Restore selection if still available
+        if current:
+            index = self.port_combo.findData(current)
+            if index >= 0:
+                self.port_combo.setCurrentIndex(index)
+
     def _setup_status_bar(self) -> None:
         """Setup status bar."""
         self.statusbar = QStatusBar()
@@ -193,19 +307,6 @@ class MainWindow(QMainWindow):
     
     def _setup_dock_widgets(self) -> None:
         """Setup dockable panels."""
-        # Connection panel dock (left side)
-        self.connection_dock = QDockWidget("Connection", self)
-        self.connection_dock.setObjectName("ConnectionDock")
-        self.connection_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.connection_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable |
-            QDockWidget.DockWidgetFeature.DockWidgetClosable |
-            QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-        self.connection_panel = ConnectionPanel()
-        self.connection_dock.setWidget(self.connection_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.connection_dock)
-        
         # Registers table dock (center-top)
         self.registers_dock = QDockWidget("Registers", self)
         self.registers_dock.setObjectName("RegistersDock")
@@ -282,7 +383,6 @@ class MainWindow(QMainWindow):
         self.splitDockWidget(self.registers_dock, self.plot_dock, Qt.Orientation.Vertical)
         
         # Add all docks to view menu
-        self._view_menu.addAction(self.connection_dock.toggleViewAction())
         self._view_menu.addAction(self.registers_dock.toggleViewAction())
         self._view_menu.addAction(self.variables_dock.toggleViewAction())
         self._view_menu.addAction(self.bits_dock.toggleViewAction())
@@ -299,7 +399,6 @@ class MainWindow(QMainWindow):
     def _reset_layout(self) -> None:
         """Reset dock layout to default."""
         # Show all docks
-        self.connection_dock.show()
         self.registers_dock.show()
         self.variables_dock.show()
         self.bits_dock.show()
@@ -307,7 +406,6 @@ class MainWindow(QMainWindow):
         self.plot_dock.show()
         
         # Float none
-        self.connection_dock.setFloating(False)
         self.registers_dock.setFloating(False)
         self.variables_dock.setFloating(False)
         self.bits_dock.setFloating(False)
@@ -315,7 +413,6 @@ class MainWindow(QMainWindow):
         self.plot_dock.setFloating(False)
         
         # Reset positions
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.connection_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.registers_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.variables_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.bits_dock)
@@ -329,10 +426,6 @@ class MainWindow(QMainWindow):
     
     def _setup_connections(self) -> None:
         """Setup signal connections."""
-        # Connection panel
-        self.connection_panel.connection_changed.connect(self._on_connection_settings_changed)
-        self.connection_panel.poll_interval_changed.connect(self._on_poll_interval_changed)
-        
         # Data engine
         self.data_engine.data_updated.connect(self._on_data_updated)
         self.data_engine.error_occurred.connect(self._on_error)
@@ -493,9 +586,21 @@ class MainWindow(QMainWindow):
         else:
             self._disconnect()
     
+    def _get_connection_settings(self) -> ConnectionSettings:
+        """Get current connection settings from toolbar."""
+        parity_map = {"None": "N", "Even": "E", "Odd": "O"}
+        return ConnectionSettings(
+            port=self.port_combo.currentData() or "",
+            slave_id=self.slave_spin.value(),
+            baud_rate=int(self.baud_combo.currentText()),
+            parity=parity_map.get(self.parity_combo.currentText(), "N"),
+            stop_bits=int(self.stopbits_combo.currentText()),
+            timeout=self.timeout_spin.value() / 1000.0,
+        )
+
     def _connect(self) -> None:
         """Connect to Modbus device."""
-        settings = self.connection_panel.get_settings()
+        settings = self._get_connection_settings()
         
         if not settings.port:
             QMessageBox.warning(self, "Warning", "Please select a COM port")
@@ -515,8 +620,16 @@ class MainWindow(QMainWindow):
             self.project.connection = settings
             self.connection_label.setText(f"🟢 Connected: {settings.port}")
             self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
-            self.start_action.setEnabled(True)
-            self.connection_panel.set_connected(True)
+            self.speed_test_panel.set_connected(True)
+            self.connect_action.setText("Disconnect")
+            
+            # Disable settings while connected
+            self._set_connection_widgets_enabled(False)
+            
+            # Start polling automatically
+            self._sync_registers()
+            self._sync_variables()
+            self.data_engine.start()
             
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", str(e))
@@ -528,20 +641,30 @@ class MainWindow(QMainWindow):
         self.modbus.disconnect()
         self.connection_label.setText("🔴 Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
-        self.start_action.setEnabled(False)
-        self.start_action.setChecked(False)
-        self.connection_panel.set_connected(False)
-    
-    def _toggle_polling(self, checked: bool) -> None:
-        """Start/stop polling."""
-        if checked:
-            self._sync_registers()
-            self._sync_variables()
-            self.data_engine.start()
-            self.start_action.setText("Stop")
-        else:
-            self.data_engine.stop()
-            self.start_action.setText("Start")
+        self.speed_test_panel.set_connected(False)
+        self.connect_action.setText("Connect")
+        
+        # Re-enable settings
+        self._set_connection_widgets_enabled(True)
+
+    def _set_connection_widgets_enabled(self, enabled: bool) -> None:
+        """Enable/disable connection settings widgets."""
+        self.port_combo.setEnabled(enabled)
+        self.refresh_ports_action.setEnabled(enabled)
+        self.slave_spin.setEnabled(enabled)
+        self.baud_combo.setEnabled(enabled)
+        self.parity_combo.setEnabled(enabled)
+        self.stopbits_combo.setEnabled(enabled)
+        self.timeout_spin.setEnabled(enabled)
+
+    def _on_poll_interval_text_changed(self, text: str) -> None:
+        """Handle poll interval change from dropdown."""
+        try:
+            interval = int(text)
+            self.data_engine.set_poll_interval(interval)
+            self.project.views.poll_interval = interval
+        except ValueError:
+            pass
     
     def _clear_data(self) -> None:
         """Clear all data history."""
@@ -581,17 +704,6 @@ class MainWindow(QMainWindow):
     
     # Event handlers
     
-    def _on_connection_settings_changed(self) -> None:
-        """Handle connection settings change."""
-        if self.modbus.is_connected:
-            # Reconnect with new settings
-            self._disconnect()
-    
-    def _on_poll_interval_changed(self, interval: int) -> None:
-        """Handle poll interval change."""
-        self.data_engine.set_poll_interval(interval)
-        self.project.views.poll_interval = interval
-    
     def _on_data_updated(self) -> None:
         """Handle data update from engine."""
         self.table_view.update_values()
@@ -606,6 +718,8 @@ class MainWindow(QMainWindow):
     def _on_connection_lost(self) -> None:
         """Handle lost connection."""
         self.connect_action.setChecked(False)
+        self.connect_action.setText("Connect")
+        self.speed_test_panel.set_connected(False)
         self._disconnect()
         QMessageBox.warning(self, "Connection Lost", "Connection to Modbus device was lost.")
     
@@ -648,9 +762,25 @@ class MainWindow(QMainWindow):
     
     def _update_ui_from_project(self) -> None:
         """Update UI from project data."""
-        self.connection_panel.set_settings(self.project.connection)
-        self.connection_panel.set_poll_interval(self.project.views.poll_interval)
+        # Update toolbar settings
+        settings = self.project.connection
+        index = self.port_combo.findData(settings.port)
+        if index >= 0:
+            self.port_combo.setCurrentIndex(index)
+        
+        self.slave_spin.setValue(settings.slave_id)
+        self.baud_combo.setCurrentText(str(settings.baud_rate))
+        
+        parity_map = {"N": "None", "E": "Even", "O": "Odd"}
+        self.parity_combo.setCurrentText(parity_map.get(settings.parity, "None"))
+        
+        self.stopbits_combo.setCurrentText(str(settings.stop_bits))
+        self.timeout_spin.setValue(int(settings.timeout * 1000))
+        
+        # Poll interval
+        self.poll_combo.setCurrentText(str(self.project.views.poll_interval))
         self.data_engine.set_poll_interval(self.project.views.poll_interval)
+        
         self._sync_registers()
         self._sync_variables()
         self._sync_bits()
@@ -668,7 +798,7 @@ class MainWindow(QMainWindow):
     
     def _update_project_from_ui(self) -> None:
         """Update project from UI state."""
-        self.project.connection = self.connection_panel.get_settings()
+        self.project.connection = self._get_connection_settings()
         self.project.views.poll_interval = self.data_engine.poll_interval
         self.project.views.plot_registers = self.plot_view.get_selected_registers()
         self.project.views.plot_variables = self.plot_view.get_selected_variables()

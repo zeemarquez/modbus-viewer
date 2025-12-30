@@ -3,7 +3,7 @@ Speed test panel for measuring Modbus read performance.
 """
 
 import time
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QSpinBox, QLabel, QGroupBox, QScrollArea, QCheckBox,
@@ -24,16 +24,51 @@ class SpeedTestWorker(QThread):
     progress = Signal(int)
     error = Signal(str)
     
-    def __init__(self, modbus: ModbusManager, registers: List[Register], num_samples: int):
+    def __init__(self, modbus: ModbusManager, registers: List[Register], num_samples: int,
+                 use_batching: bool = False, clear_buffers: bool = True, close_port: bool = False):
         super().__init__()
         self.modbus = modbus
         self.registers = registers
         self.num_samples = num_samples
+        self.use_batching = use_batching
+        self.clear_buffers = clear_buffers
+        self.close_port = close_port
         self._is_running = True
         
     def stop(self):
         self._is_running = False
         
+    def _group_registers(self, sorted_regs: List[Register]) -> List[Tuple[int, int]]:
+        """Group registers into contiguous blocks for efficient reading."""
+        if not sorted_regs:
+            return []
+        
+        groups = []
+        current_start = sorted_regs[0].address
+        current_end = current_start + sorted_regs[0].size
+        
+        # Modbus limits: max 125 registers per request
+        MAX_READ = 120 
+        # Max gap to fill between registers (reading extra registers is often faster than new request)
+        MAX_GAP = 20 
+        
+        for i in range(1, len(sorted_regs)):
+            reg = sorted_regs[i]
+            gap = reg.address - current_end
+            
+            if gap <= MAX_GAP and (reg.address + reg.size - current_start) <= MAX_READ:
+                # Add to current group
+                current_end = reg.address + reg.size
+            else:
+                # Close current group and start new one
+                groups.append((current_start, current_end - current_start))
+                current_start = reg.address
+                current_end = current_start + reg.size
+        
+        # Add last group
+        groups.append((current_start, current_end - current_start))
+        return groups
+
     def run(self):
         if not self.modbus.is_connected:
             self.error.emit("Modbus not connected")
@@ -47,6 +82,19 @@ class SpeedTestWorker(QThread):
             # We use the instrument directly to bypass any high-level logic and get max speed
             instrument = self.modbus.instrument
             
+            # Save original settings
+            orig_clear = instrument.clear_buffers_before_each_transaction
+            orig_close = instrument.close_port_after_each_call
+            
+            # Apply test settings
+            instrument.clear_buffers_before_each_transaction = self.clear_buffers
+            instrument.close_port_after_each_call = self.close_port
+            
+            # Prepare batches if enabled
+            if self.use_batching:
+                sorted_regs = sorted(self.registers, key=lambda r: r.address)
+                batches = self._group_registers(sorted_regs)
+            
             start_time = time.time()
             total_reads = 0
             total_registers = 0
@@ -55,22 +103,34 @@ class SpeedTestWorker(QThread):
                 if not self._is_running:
                     break
                     
-                for reg in self.registers:
-                    if not self._is_running:
-                        break
-                    
-                    if reg.size == 1:
-                        instrument.read_register(reg.address, 0)
-                    else:
-                        instrument.read_registers(reg.address, reg.size)
+                if self.use_batching:
+                    for start_addr, count in batches:
+                        if not self._is_running:
+                            break
+                        instrument.read_registers(start_addr, count)
+                        total_reads += 1
+                        total_registers += count
+                else:
+                    for reg in self.registers:
+                        if not self._is_running:
+                            break
                         
-                    total_reads += 1
-                    total_registers += reg.size
+                        if reg.size == 1:
+                            instrument.read_register(reg.address, 0)
+                        else:
+                            instrument.read_registers(reg.address, reg.size)
+                            
+                        total_reads += 1
+                        total_registers += reg.size
                 
                 self.progress.emit(int((i + 1) / self.num_samples * 100))
                 
             end_time = time.time()
             duration = end_time - start_time
+            
+            # Restore original settings
+            instrument.clear_buffers_before_each_transaction = orig_clear
+            instrument.close_port_after_each_call = orig_close
             
             if duration > 0:
                 results = {
@@ -137,20 +197,49 @@ class SpeedTestPanel(QWidget):
         
         # Settings group
         settings_group = QGroupBox("Test Settings")
-        settings_layout = QHBoxLayout(settings_group)
+        settings_layout = QVBoxLayout(settings_group)
         
-        settings_layout.addWidget(QLabel("Samples:"))
+        # Samples row
+        samples_row = QHBoxLayout()
+        samples_row.addWidget(QLabel("Samples:"))
         self.samples_spin = QSpinBox()
         self.samples_spin.setRange(1, 10000)
         self.samples_spin.setValue(100)
-        settings_layout.addWidget(self.samples_spin)
+        samples_row.addWidget(self.samples_spin)
+        settings_layout.addLayout(samples_row)
+        
+        # Options row
+        self.batch_check = QCheckBox("Batch Read")
+        self.batch_check.setToolTip("Group contiguous registers into single Modbus requests. This is how the app normally polls data.")
+        settings_layout.addWidget(self.batch_check)
+        
+        self.clear_buffers_check = QCheckBox("Clear Buffers")
+        self.clear_buffers_check.setChecked(True)
+        self.clear_buffers_check.setToolTip("Clear serial buffers before each transaction. Increases reliability but adds slight overhead.")
+        settings_layout.addWidget(self.clear_buffers_check)
+        
+        self.close_port_check = QCheckBox("Close Port After Call")
+        self.close_port_check.setToolTip("Close and reopen the serial port for every request. This will significantly decrease performance.")
+        settings_layout.addWidget(self.close_port_check)
         
         layout.addWidget(settings_group)
         
         # Start button
         self.start_btn = QPushButton("Start Test")
         self.start_btn.setFixedHeight(40)
-        self.start_btn.setStyleSheet(f"font-weight: bold; background-color: {COLORS['accent']}; color: white;")
+        self.start_btn.setEnabled(False)
+        self.start_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-weight: bold; 
+                background-color: {COLORS['accent']}; 
+                color: white;
+                border: none;
+            }}
+            QPushButton:disabled {{
+                background-color: {COLORS['bg_tertiary']};
+                color: {COLORS['text_disabled']};
+            }}
+        """)
         self.start_btn.clicked.connect(self._toggle_test)
         layout.addWidget(self.start_btn)
         
@@ -201,6 +290,14 @@ class SpeedTestPanel(QWidget):
             self.scroll_layout.addWidget(cb)
             self._register_checkboxes[reg.address] = cb
             
+    def set_connected(self, connected: bool):
+        """Update connection state."""
+        self.start_btn.setEnabled(connected)
+        if not connected:
+            self.status_label.setText("Modbus not connected")
+        else:
+            self.status_label.setText("Select registers and press Start")
+            
     def _select_all(self):
         for cb in self._register_checkboxes.values():
             cb.setChecked(True)
@@ -237,7 +334,10 @@ class SpeedTestPanel(QWidget):
         self.worker = SpeedTestWorker(
             self.modbus,
             selected_registers,
-            self.samples_spin.value()
+            self.samples_spin.value(),
+            use_batching=self.batch_check.isChecked(),
+            clear_buffers=self.clear_buffers_check.isChecked(),
+            close_port=self.close_port_check.isChecked()
         )
         self.worker.finished.connect(self._on_test_finished)
         self.worker.error.connect(self._on_test_error)
