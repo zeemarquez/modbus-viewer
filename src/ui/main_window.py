@@ -19,6 +19,7 @@ from src.ui.table_view import TableView
 from src.ui.plot_view import PlotView
 from src.ui.variables_panel import VariablesPanel
 from src.ui.bits_panel import BitsPanel
+from src.ui.speed_test_panel import SpeedTestPanel
 from src.ui.register_editor import RegisterEditorDialog
 from src.ui.styles import COLORS
 
@@ -244,9 +245,23 @@ class MainWindow(QMainWindow):
         self.bits_dock.setWidget(self.bits_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.bits_dock)
         
-        # Tab Variables and Bits with Registers
+        # Speed Test panel dock
+        self.speed_test_dock = QDockWidget("Speed Test", self)
+        self.speed_test_dock.setObjectName("SpeedTestDock")
+        self.speed_test_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.speed_test_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable |
+            QDockWidget.DockWidgetFeature.DockWidgetClosable |
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.speed_test_panel = SpeedTestPanel(self.modbus, self.data_engine)
+        self.speed_test_dock.setWidget(self.speed_test_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.speed_test_dock)
+        
+        # Tab Variables, Bits and Speed Test with Registers
         self.tabifyDockWidget(self.registers_dock, self.variables_dock)
         self.tabifyDockWidget(self.variables_dock, self.bits_dock)
+        self.tabifyDockWidget(self.bits_dock, self.speed_test_dock)
         # Make Registers the active tab
         self.registers_dock.raise_()
         
@@ -271,6 +286,7 @@ class MainWindow(QMainWindow):
         self._view_menu.addAction(self.registers_dock.toggleViewAction())
         self._view_menu.addAction(self.variables_dock.toggleViewAction())
         self._view_menu.addAction(self.bits_dock.toggleViewAction())
+        self._view_menu.addAction(self.speed_test_dock.toggleViewAction())
         self._view_menu.addAction(self.plot_dock.toggleViewAction())
         
         self._view_menu.addSeparator()
@@ -287,6 +303,7 @@ class MainWindow(QMainWindow):
         self.registers_dock.show()
         self.variables_dock.show()
         self.bits_dock.show()
+        self.speed_test_dock.show()
         self.plot_dock.show()
         
         # Float none
@@ -294,6 +311,7 @@ class MainWindow(QMainWindow):
         self.registers_dock.setFloating(False)
         self.variables_dock.setFloating(False)
         self.bits_dock.setFloating(False)
+        self.speed_test_dock.setFloating(False)
         self.plot_dock.setFloating(False)
         
         # Reset positions
@@ -301,8 +319,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.registers_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.variables_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.bits_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.speed_test_dock)
         self.tabifyDockWidget(self.registers_dock, self.variables_dock)
         self.tabifyDockWidget(self.variables_dock, self.bits_dock)
+        self.tabifyDockWidget(self.bits_dock, self.speed_test_dock)
         self.registers_dock.raise_()
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.plot_dock)
         self.splitDockWidget(self.registers_dock, self.plot_dock, Qt.Orientation.Vertical)
@@ -455,6 +475,7 @@ class MainWindow(QMainWindow):
         self.plot_view.set_registers(self.project.registers)
         self.variables_panel.set_registers(self.project.registers)
         self.bits_panel.set_registers(self.project.registers)
+        self.speed_test_panel.set_registers(self.project.registers)
     
     def _sync_variables(self) -> None:
         """Sync variables to all components."""
