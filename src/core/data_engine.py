@@ -166,25 +166,32 @@ class DataEngine(QObject):
         self._last_poll_time = now
         self._poll_count += 1
         
-        with self._write_lock:
-            # Always poll fast registers
-            self._poll_batches(self._fast_batches, now)
-            
-            # Poll slow registers every 500ms
-            if now - self._last_slow_poll_time >= self._slow_poll_interval:
-                self._poll_batches(self._slow_batches, now)
-                self._last_slow_poll_time = now
-            
-            # Evaluate variables
-            for variable in self.variables:
-                try:
-                    value = self.variable_evaluator.evaluate(variable.expression)
-                    variable.value = value
-                    variable.error = None
-                    self._append_history(variable.name, value, now)
-                except Exception as e:
-                    variable.value = None
-                    variable.error = str(e)
+        try:
+            with self._write_lock:
+                # Always poll fast registers
+                self._poll_batches(self._fast_batches, now)
+                
+                # Poll slow registers every 500ms
+                if now - self._last_slow_poll_time >= self._slow_poll_interval:
+                    self._poll_batches(self._slow_batches, now)
+                    self._last_slow_poll_time = now
+                
+                # Evaluate variables
+                for variable in self.variables:
+                    try:
+                        value = self.variable_evaluator.evaluate(variable.expression)
+                        variable.value = value
+                        variable.error = None
+                        self._append_history(variable.name, value, now)
+                    except Exception as e:
+                        variable.value = None
+                        variable.error = str(e)
+        except Exception as e:
+            # If we get here, it's a critical serial error from _poll_batches
+            self._is_running = False
+            self.modbus.is_connected = False
+            self.connection_lost.emit()
+            return False
         
         return True
 
@@ -204,7 +211,11 @@ class DataEngine(QObject):
                     try:
                         raw_values = self.modbus.instrument.read_registers(start_addr, count)
                         self._update_register_values(regs_in_group, raw_values, start_addr, now)
-                    except Exception:
+                    except Exception as e:
+                        # Check for critical serial errors (like port unplugged)
+                        if any(err in str(e).lower() for err in ["access is denied", "file not found", "device not found", "permissionerror"]):
+                            raise e
+                            
                         # Fallback: if batch read fails, try individual reads
                         for reg in regs_in_group:
                             try:
@@ -215,10 +226,16 @@ class DataEngine(QObject):
                                     vals = self.modbus.instrument.read_registers(reg.address, reg.size)
                                     self._update_register_values([reg], vals, reg.address, now)
                             except Exception as individual_e:
+                                if any(err in str(individual_e).lower() for err in ["access is denied", "file not found", "device not found", "permissionerror"]):
+                                    raise individual_e
                                 reg.error = str(individual_e)
                                 self._error_count += 1
                         
             except Exception as e:
+                # If it's a critical serial error, re-raise to be caught in _poll
+                if any(err in str(e).lower() for err in ["access is denied", "file not found", "device not found", "permissionerror"]):
+                    raise e
+                    
                 for reg in regs_in_group:
                     reg.error = str(e)
                 self._error_count += 1

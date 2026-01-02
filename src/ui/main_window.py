@@ -23,6 +23,7 @@ from src.ui.variables_panel import VariablesPanel
 from src.ui.bits_panel import BitsPanel
 from src.ui.speed_test_panel import SpeedTestPanel
 from src.ui.register_editor import RegisterEditorDialog
+from src.ui.scan_dialog import ScanDialog
 from src.ui.styles import COLORS
 
 
@@ -159,6 +160,11 @@ class MainWindow(QMainWindow):
         self.refresh_ports_action.setToolTip("Refresh COM ports")
         self.refresh_ports_action.triggered.connect(self._refresh_ports)
         toolbar.addAction(self.refresh_ports_action)
+        
+        self.scan_action = QAction("Scan", self)
+        self.scan_action.setToolTip("Scan for Modbus devices")
+        self.scan_action.triggered.connect(self._open_scan_dialog)
+        toolbar.addAction(self.scan_action)
         
         toolbar.addSeparator()
         
@@ -665,6 +671,41 @@ class MainWindow(QMainWindow):
             self.project.views.poll_interval = interval
         except ValueError:
             pass
+    
+    def _open_scan_dialog(self) -> None:
+        """Open the Modbus device scan dialog."""
+        # If already connected, disconnect first to free the serial port for scanning
+        if self.modbus.is_connected:
+            self.connect_action.setChecked(False)
+            self._disconnect()
+            
+        dialog = ScanDialog(
+            parent=self,
+            initial_port=self.port_combo.currentData() or "",
+            initial_baud=int(self.baud_combo.currentText())
+        )
+        # Pre-set parity and stop bits from main window
+        dialog.parity_combo.setCurrentText(self.parity_combo.currentText())
+        dialog.stopbits_combo.setCurrentText(self.stopbits_combo.currentText())
+        
+        dialog.connect_requested.connect(self._on_scan_connect_requested)
+        dialog.exec()
+
+    def _on_scan_connect_requested(self, settings: dict) -> None:
+        """Handle connection request from scan dialog."""
+        # Update UI with scanned settings
+        index = self.port_combo.findData(settings["port"])
+        if index >= 0:
+            self.port_combo.setCurrentIndex(index)
+            
+        self.slave_spin.setValue(settings["slave_id"])
+        self.baud_combo.setCurrentText(str(settings["baud_rate"]))
+        self.parity_combo.setCurrentText(settings["parity"])
+        self.stopbits_combo.setCurrentText(str(settings["stop_bits"]))
+        
+        # Trigger actual connection
+        self.connect_action.setChecked(True)
+        self._connect()
     
     def _clear_data(self) -> None:
         """Clear all data history."""

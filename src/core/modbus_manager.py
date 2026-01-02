@@ -195,3 +195,50 @@ class ModbusManager:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def probe_device(
+        port: str,
+        slave_id: int,
+        baud_rate: int,
+        register_address: int,
+        parity: str = "N",
+        stop_bits: int = 1,
+        timeout: float = 0.1,
+    ) -> bool:
+        """
+        Probe a single slave ID to see if it responds.
+        
+        Args:
+            port: COM port
+            slave_id: Modbus slave address
+            baud_rate: Serial baud rate
+            register_address: Register address to try reading
+            parity: Parity ('N', 'E', 'O')
+            stop_bits: Stop bits (1 or 2)
+            timeout: Read timeout in seconds
+            
+        Returns:
+            True if device responded, False otherwise
+        """
+        try:
+            instrument = minimalmodbus.Instrument(port, slave_id)
+            instrument.serial.baudrate = baud_rate
+            
+            parity_map = {
+                'N': serial.PARITY_NONE,
+                'E': serial.PARITY_EVEN,
+                'O': serial.PARITY_ODD,
+            }
+            instrument.serial.parity = parity_map.get(parity, serial.PARITY_NONE)
+            instrument.serial.stopbits = stop_bits
+            instrument.serial.timeout = timeout
+            
+            # Try reading the specified register
+            instrument.read_register(register_address, 0)
+            return True
+        except Exception:
+            return False
+        finally:
+            if 'instrument' in locals() and instrument.serial.is_open:
+                instrument.serial.close()
