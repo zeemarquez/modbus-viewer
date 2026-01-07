@@ -206,11 +206,25 @@ class BitsPanel(QFrame):
         
         # Toggle the value
         new_value = not current_new_value
-        self._pending_bit_values[bit.name] = new_value
         
-        # Calculate new register value and emit signal
+        # If the new value matches the actual current value, remove from pending
+        actual_value = bit.value if bit.value is not None else False
+        if new_value == actual_value:
+            self._pending_bit_values.pop(bit.name, None)
+        else:
+            self._pending_bit_values[bit.name] = new_value
+        
+        # Calculate new register value based on ALL bits for this register
+        # Start with the last known value from the device
         current_reg_value = reg.raw_value if reg.raw_value is not None else 0
-        new_reg_value = bit.apply_to_value(int(current_reg_value), new_value)
+        new_reg_value = int(current_reg_value)
+        
+        # Apply all bits for this register that have pending values
+        for b in self.bits:
+            if b.register_address == reg.address:
+                if b.name in self._pending_bit_values:
+                    new_reg_value = b.apply_to_value(new_reg_value, self._pending_bit_values[b.name])
+        
         self.bit_value_changed.emit(reg.address, new_reg_value)
         
         # Update display
@@ -282,9 +296,15 @@ class BitsPanel(QFrame):
         finally:
             self.table.blockSignals(False)
     
-    def clear_pending(self) -> None:
+    def clear_pending(self, register_address: Optional[int] = None) -> None:
         """Clear pending bit values."""
-        self._pending_bit_values.clear()
+        if register_address is None:
+            self._pending_bit_values.clear()
+        else:
+            # Only clear bits for this register
+            for bit in self.bits:
+                if bit.register_address == register_address:
+                    self._pending_bit_values.pop(bit.name, None)
         self._update_display()
     
     def _add_bit(self) -> None:

@@ -1,9 +1,9 @@
 {
   "version": "1.0",
   "connection": {
-    "port": "COM5",
-    "slave_id": 1,
-    "baud_rate": 115200,
+    "port": "COM11",
+    "slave_id": 2,
+    "baud_rate": 230400,
     "parity": "N",
     "stop_bits": 1,
     "timeout": 1.0
@@ -167,7 +167,7 @@
       "scale": 1.0,
       "access_mode": "read",
       "display_format": "decimal",
-      "fast_poll": false
+      "fast_poll": true
     },
     {
       "address": 22,
@@ -177,7 +177,7 @@
       "scale": 1.0,
       "access_mode": "read",
       "display_format": "decimal",
-      "fast_poll": false
+      "fast_poll": true
     },
     {
       "address": 24,
@@ -187,31 +187,113 @@
       "scale": 1.0,
       "access_mode": "read",
       "display_format": "decimal",
+      "fast_poll": true
+    },
+    {
+      "address": 50,
+      "size": 2,
+      "label": "KALMAN Q",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 52,
+      "size": 2,
+      "label": "KALMAN R",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 54,
+      "size": 2,
+      "label": "KALMAN SCALE",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
       "fast_poll": false
     }
   ],
-  "variables": [],
+  "variables": [
+    {
+      "name": "CH1",
+      "label": "ch1",
+      "expression": "R18/R12",
+      "format": "decimal"
+    },
+    {
+      "name": "KALMAN_Q",
+      "label": "kalman_q",
+      "expression": "R50/R54",
+      "format": "decimal"
+    },
+    {
+      "name": "KALMAN_R",
+      "label": "kalman_r",
+      "expression": "R52/R54",
+      "format": "decimal"
+    }
+  ],
   "bits": [
     {
       "name": "RESET",
       "register_address": 6,
       "bit_index": 0,
       "label": "RESET"
+    },
+    {
+      "name": "ENABLE_CH1",
+      "register_address": 6,
+      "bit_index": 1,
+      "label": "ENABLE_CH1"
+    },
+    {
+      "name": "ENABLE_CH2",
+      "register_address": 6,
+      "bit_index": 2,
+      "label": "ENABLE_CH2"
+    },
+    {
+      "name": "ENABLE_CH3",
+      "register_address": 6,
+      "bit_index": 3,
+      "label": "ENABLE_CH3"
+    },
+    {
+      "name": "ENABLE_CH4",
+      "register_address": 6,
+      "bit_index": 4,
+      "label": "ENABLE_CH4"
+    },
+    {
+      "name": "ENABLE_SHIELD",
+      "register_address": 6,
+      "bit_index": 5,
+      "label": "ENABLE_SHIELD"
     }
   ],
   "views": {
-    "plot_registers": [
-      18
+    "plot_registers": [],
+    "plot_variables": [
+      "CH1"
     ],
-    "plot_variables": [],
     "plot_time_window": 60,
     "poll_interval": 100,
     "plot_options": {
       "line_width": 1.0,
       "grid_alpha": 0.1,
       "show_legend": true,
-      "time_window_index": 2
+      "time_window_index": 2,
+      "y_auto_scale": false,
+      "y_min": 0.0,
+      "y_max": 220.0
     }
   },
-  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAADzAAADifwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsBAAAAUwAAA4kAAAJCAP///wAAAAEAAAaFAAADifwCAAAAAfwAAABTAAADiQAAARgA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAAD7AAAESAAAAX8A////+gAAAAECAAAAAvsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG+wAAABAAUABsAG8AdABEAG8AYwBrAQAAAFIAAAOKAAAAggD////8AAAFRwAAAjkAAADYAP////wCAAAAAvsAAAAaAFIAZQBnAGkAcwB0AGUAcgBzAEQAbwBjAGsBAAAAUwAAAiMAAAB+AP////wAAAJ6AAABYgAAAJYBAAAX+gAAAAEBAAAAAvsAAAAaAFYAYQByAGkAYQBiAGwAZQBzAEQAbwBjAGsBAAAAAP////8AAADYAP////sAAAAQAEIAaQB0AHMARABvAGMAawEAAAVHAAACOQAAANgA////AAAAAAAAA4kAAAAEAAAABAAAAAgAAAAI/AAAAAEAAAACAAAAAQAAABYATQBhAGkAbgBUAG8AbwBsAGIAYQByAQAAAAD/////AAAAAAAAAAA="
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAADdAAADifwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsBAAAAUwAAA4kAAAJCAP///wAAAAEAAAabAAADifwCAAAAAfwAAABTAAADiQAAARgA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAADlAAADmgAAAX8A////+gAAAAECAAAAAvsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG+wAAABAAUABsAG8AdABEAG8AYwBrAQAAAFIAAAOKAAAAggD////8AAAEgwAAAv0AAADYAP////wCAAAAAvsAAAAaAFIAZQBnAGkAcwB0AGUAcgBzAEQAbwBjAGsBAAAAUwAAAcoAAAB+AP////wAAAIhAAABuwAAAJYBAAAX+gAAAAEBAAAAAvsAAAAaAFYAYQByAGkAYQBiAGwAZQBzAEQAbwBjAGsBAAAAAP////8AAADYAP////sAAAAQAEIAaQB0AHMARABvAGMAawEAAAVHAAACOQAAANgA////AAAAAAAAA4kAAAAEAAAABAAAAAgAAAAI/AAAAAEAAAACAAAAAQAAABYATQBhAGkAbgBUAG8AbwBsAGIAYQByAQAAAAD/////AAAAAAAAAAA="
 }

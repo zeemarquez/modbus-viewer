@@ -54,6 +54,9 @@ class PlotOptions:
     grid_alpha: float = 0.1
     show_legend: bool = True
     time_window_index: int = 4  # Index in time window combo (0=1s, 1=5s, 2=10s, 3=30s, 4=1min, 5=2min, 6=5min)
+    y_auto_scale: bool = True
+    y_min: float = 0.0
+    y_max: float = 100.0
     
     def to_dict(self) -> dict:
         return {
@@ -61,6 +64,9 @@ class PlotOptions:
             "grid_alpha": self.grid_alpha,
             "show_legend": self.show_legend,
             "time_window_index": self.time_window_index,
+            "y_auto_scale": self.y_auto_scale,
+            "y_min": self.y_min,
+            "y_max": self.y_max,
         }
     
     @classmethod
@@ -70,6 +76,9 @@ class PlotOptions:
             grid_alpha=data.get("grid_alpha", 0.1),
             show_legend=data.get("show_legend", True),
             time_window_index=data.get("time_window_index", 4),
+            y_auto_scale=data.get("y_auto_scale", True),
+            y_min=data.get("y_min", 0.0),
+            y_max=data.get("y_max", 100.0),
         )
 
 

@@ -248,13 +248,18 @@ class TableView(QFrame):
             if reg.address == address:
                 item = self.table.item(row, 4)
                 if item:
-                    # Format the value using the register's display format
-                    formatted = self._format_for_input(reg, value)
+                    # Update pending writes: only if different from current value
                     self.table.blockSignals(True)
-                    item.setText(formatted)
+                    if reg.raw_value is not None and value == int(reg.raw_value):
+                        self._pending_writes.pop(address, None)
+                        item.setText("")
+                    else:
+                        self._pending_writes[address] = float(value)
+                        # Format the value using the register's display format
+                        formatted = self._format_for_input(reg, value)
+                        item.setText(formatted)
                     self.table.blockSignals(False)
-                    # Update pending writes
-                    self._pending_writes[address] = float(value)
+                    
                     self._update_write_button()
                 break
     

@@ -770,7 +770,7 @@ class MainWindow(QMainWindow):
         if success:
             self.statusbar.showMessage(f"Wrote {value} to register {register.address}", 3000)
             # Clear bits panel pending values for this register
-            self.bits_panel.clear_pending()
+            self.bits_panel.clear_pending(register.address)
     
     def _on_variables_changed(self) -> None:
         """Handle variables change from panel."""

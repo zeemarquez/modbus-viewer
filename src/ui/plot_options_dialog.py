@@ -20,6 +20,7 @@ class PlotOptionsDialog(QDialog):
     
     def __init__(self, line_width: float = 2.0, grid_alpha: float = 0.1, 
                  show_legend: bool = True, time_window_index: int = 2,
+                 y_auto_scale: bool = True, y_min: float = 0.0, y_max: float = 100.0,
                  registers: List[Register] = None, variables: List[Variable] = None,
                  selected_registers: List[int] = None, selected_variables: List[str] = None,
                  parent=None):
@@ -29,6 +30,9 @@ class PlotOptionsDialog(QDialog):
         self.grid_alpha = grid_alpha
         self.show_legend = show_legend
         self.time_window_index = time_window_index
+        self.y_auto_scale = y_auto_scale
+        self.y_min = y_min
+        self.y_max = y_max
         self.registers = registers or []
         self.variables = variables or []
         self.selected_registers = selected_registers or []
@@ -96,6 +100,31 @@ class PlotOptionsDialog(QDialog):
         grid_layout.addRow("Grid Opacity:", self.grid_alpha_spin)
         
         left_column.addWidget(grid_group)
+
+        # Y Axis options
+        y_axis_group = QGroupBox("Y Axis Options")
+        y_axis_layout = QFormLayout(y_axis_group)
+        y_axis_layout.setSpacing(8)
+
+        self.y_auto_scale_check = QCheckBox("Auto Scale")
+        self.y_auto_scale_check.setChecked(self.y_auto_scale)
+        self.y_auto_scale_check.toggled.connect(self._on_auto_scale_toggled)
+        y_axis_layout.addRow(self.y_auto_scale_check)
+
+        self.y_min_spin = QDoubleSpinBox()
+        self.y_min_spin.setRange(-1e9, 1e9)
+        self.y_min_spin.setValue(self.y_min)
+        y_axis_layout.addRow("Min Y:", self.y_min_spin)
+
+        self.y_max_spin = QDoubleSpinBox()
+        self.y_max_spin.setRange(-1e9, 1e9)
+        self.y_max_spin.setValue(self.y_max)
+        y_axis_layout.addRow("Max Y:", self.y_max_spin)
+
+        # Initial state for Y spin boxes
+        self._on_auto_scale_toggled(self.y_auto_scale)
+
+        left_column.addWidget(y_axis_group)
         
         # Display options
         display_group = QGroupBox("Display Options")
@@ -267,6 +296,11 @@ class PlotOptionsDialog(QDialog):
         for checkbox in self._variable_checkboxes.values():
             checkbox.setChecked(False)
     
+    def _on_auto_scale_toggled(self, checked: bool) -> None:
+        """Enable/disable Y min/max inputs based on auto scale."""
+        self.y_min_spin.setEnabled(not checked)
+        self.y_max_spin.setEnabled(not checked)
+    
     def get_options(self) -> dict:
         """Get the selected options."""
         selected_registers = [
@@ -283,6 +317,9 @@ class PlotOptionsDialog(QDialog):
             'grid_alpha': self.grid_alpha_spin.value(),
             'show_legend': self.show_legend_check.isChecked(),
             'time_window_index': self.time_combo.currentIndex(),
+            'y_auto_scale': self.y_auto_scale_check.isChecked(),
+            'y_min': self.y_min_spin.value(),
+            'y_max': self.y_max_spin.value(),
             'selected_registers': selected_registers,
             'selected_variables': selected_variables,
         }

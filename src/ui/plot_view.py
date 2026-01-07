@@ -57,6 +57,9 @@ class PlotView(QFrame):
         self._line_width = 2.0
         self._grid_alpha = 0.1
         self._show_legend = True
+        self._y_auto_scale = True
+        self._y_min = 0.0
+        self._y_max = 100.0
         
         self._setup_ui()
     
@@ -132,6 +135,9 @@ class PlotView(QFrame):
             grid_alpha=self._grid_alpha,
             show_legend=self._show_legend,
             time_window_index=self.time_combo.currentIndex(),
+            y_auto_scale=self._y_auto_scale,
+            y_min=self._y_min,
+            y_max=self._y_max,
             registers=self.registers,
             variables=self.variables,
             selected_registers=self.get_selected_registers(),
@@ -144,6 +150,9 @@ class PlotView(QFrame):
             self._line_width = options['line_width']
             self._grid_alpha = options['grid_alpha']
             self._show_legend = options['show_legend']
+            self._y_auto_scale = options['y_auto_scale']
+            self._y_min = options['y_min']
+            self._y_max = options['y_max']
             
             # Update time window
             time_window_index = options['time_window_index']
@@ -157,6 +166,13 @@ class PlotView(QFrame):
             
             # Apply options
             self.plot_widget.showGrid(x=True, y=True, alpha=self._grid_alpha)
+            
+            # Apply Y axis scaling
+            if self._y_auto_scale:
+                self.plot_widget.enableAutoRange(axis='y')
+            else:
+                self.plot_widget.disableAutoRange(axis='y')
+                self.plot_widget.setYRange(self._y_min, self._y_max, padding=0)
             
             if self._show_legend:
                 if not self.legend:
@@ -230,9 +246,11 @@ class PlotView(QFrame):
         # Update x-axis range
         self.plot_widget.setXRange(-self._time_window, 0, padding=0.02)
         
-        # Auto-scale Y axis to fit data
-        if has_data:
+        # Auto-scale Y axis to fit data if enabled
+        if has_data and self._y_auto_scale:
             self.plot_widget.enableAutoRange(axis='y')
+        elif not self._y_auto_scale:
+            self.plot_widget.setYRange(self._y_min, self._y_max, padding=0)
     
     def clear(self) -> None:
         """Clear all plot data."""
@@ -320,6 +338,9 @@ class PlotView(QFrame):
             grid_alpha=self._grid_alpha,
             show_legend=self._show_legend,
             time_window_index=self.time_combo.currentIndex(),
+            y_auto_scale=self._y_auto_scale,
+            y_min=self._y_min,
+            y_max=self._y_max,
         )
     
     def set_plot_options(self, options: PlotOptions) -> None:
@@ -327,9 +348,19 @@ class PlotView(QFrame):
         self._line_width = options.line_width
         self._grid_alpha = options.grid_alpha
         self._show_legend = options.show_legend
+        self._y_auto_scale = options.y_auto_scale
+        self._y_min = options.y_min
+        self._y_max = options.y_max
         
         # Apply grid alpha
         self.plot_widget.showGrid(x=True, y=True, alpha=self._grid_alpha)
+        
+        # Apply Y axis scaling
+        if self._y_auto_scale:
+            self.plot_widget.enableAutoRange(axis='y')
+        else:
+            self.plot_widget.disableAutoRange(axis='y')
+            self.plot_widget.setYRange(self._y_min, self._y_max, padding=0)
         
         # Apply legend visibility
         if self._show_legend:
