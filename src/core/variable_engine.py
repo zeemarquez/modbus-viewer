@@ -1,12 +1,13 @@
 """
 Variable expression evaluator for computing values from registers.
+Supports multi-device register references with D<id>.R<addr> syntax.
 """
 
 import ast
 import math
 import operator
 import re
-from typing import Dict, List, Optional, Callable, Union
+from typing import Dict, List, Optional, Callable, Union, Tuple
 
 from src.models.variable import Variable
 from src.models.register import Register
@@ -17,16 +18,18 @@ class VariableEvaluator:
     Evaluates variable expressions using register values.
     
     Supports:
-    - Register references: R0, R1, R100 (uses scaled register value)
+    - Register references: D1.R0, D1.R100, D2.R0 (device.register syntax)
+    - Legacy register references: R0, R1 (defaults to device 1)
     - Operators: +, -, *, /, //, %, **
     - Functions: abs, min, max, sqrt, round, sin, cos, tan
     - Parentheses for grouping
     - Numbers (int and float)
     
     Example expressions:
-    - "R0 + R1"
-    - "R0 * 0.5 + R1 * 0.5"
-    - "sqrt(R0**2 + R1**2)"
+    - "D1.R0 + D1.R1"
+    - "D1.R0 * 0.5 + D2.R0 * 0.5"
+    - "sqrt(D1.R0**2 + D1.R1**2)"
+    - "R0 + R1"  (legacy, defaults to D1)
     """
     
     # Allowed operators
@@ -62,42 +65,65 @@ class VariableEvaluator:
     
     def __init__(self):
         self._registers: List[Register] = []
-        self._register_map: Dict[int, Register] = {}  # address -> register
+        self._register_map: Dict[Tuple[int, int], Register] = {}  # (slave_id, address) -> register
     
     def set_registers(self, registers: List[Register]) -> None:
         """Set the available registers for expression evaluation."""
         self._registers = registers
-        self._register_map = {r.address: r for r in registers}
+        self._register_map = {(r.slave_id, r.address): r for r in registers}
     
     def _preprocess_expression(self, expression: str) -> str:
         """
         Preprocess expression to convert register references to variable names.
         
         Converts:
-        - R0, R1, R100 -> _R0, _R1, _R100
+        - D1.R0, D1.R100 -> _D1_R0, _D1_R100
+        - R0, R100 (legacy) -> _D1_R0, _D1_R100
         """
-        # Replace R<address> references
-        reg_pattern = r'\bR(\d+)\b'
-        result = re.sub(reg_pattern, r'_R\1', expression)
+        # First, replace D<id>.R<addr> references
+        full_pattern = r'\bD(\d+)\.R(\d+)\b'
+        result = re.sub(full_pattern, r'_D\1_R\2', expression)
+        
+        # Then, replace legacy R<addr> references (not already prefixed with D)
+        # Match R<addr> that is NOT preceded by _D<digits>_ (already converted)
+        legacy_pattern = r'(?<!_D\d_)(?<!_D\d\d_)(?<!_D\d\d\d_)\bR(\d+)\b'
+        result = re.sub(legacy_pattern, r'_D1_R\1', result)
+        
         return result
     
     def _get_variables(self, expression: str) -> Dict[str, float]:
         """Get variable values for the expression."""
         variables = {}
         
-        # Find R<address> references
-        reg_pattern = r'\bR(\d+)\b'
-        for match in re.finditer(reg_pattern, expression):
-            address = int(match.group(1))
-            var_name = f"_R{address}"
-            if address in self._register_map:
-                reg = self._register_map[address]
+        # Find D<id>.R<addr> references
+        full_pattern = r'\bD(\d+)\.R(\d+)\b'
+        for match in re.finditer(full_pattern, expression):
+            slave_id = int(match.group(1))
+            address = int(match.group(2))
+            var_name = f"_D{slave_id}_R{address}"
+            if (slave_id, address) in self._register_map:
+                reg = self._register_map[(slave_id, address)]
                 if reg.scaled_value is not None:
                     variables[var_name] = reg.scaled_value
                 else:
                     variables[var_name] = 0.0
             else:
                 variables[var_name] = 0.0
+        
+        # Find legacy R<addr> references (default to slave_id=1)
+        legacy_pattern = r'(?<!\.)(?<!D\d)\bR(\d+)\b'
+        for match in re.finditer(legacy_pattern, expression):
+            address = int(match.group(1))
+            var_name = f"_D1_R{address}"
+            if var_name not in variables:
+                if (1, address) in self._register_map:
+                    reg = self._register_map[(1, address)]
+                    if reg.scaled_value is not None:
+                        variables[var_name] = reg.scaled_value
+                    else:
+                        variables[var_name] = 0.0
+                else:
+                    variables[var_name] = 0.0
         
         return variables
     
@@ -216,8 +242,9 @@ class VariableEvaluator:
             
             # Create dummy variables for validation
             variables = {}
-            reg_pattern = r'_R(\d+)'
-            for match in re.finditer(reg_pattern, processed):
+            # Match both D<id>.R<addr> and legacy R<addr> patterns in preprocessed form
+            var_pattern = r'_D(\d+)_R(\d+)'
+            for match in re.finditer(var_pattern, processed):
                 variables[match.group(0)] = 1.0  # Use 1.0 instead of 0 to avoid division by zero in validation
             
             self._eval_node(tree.body, variables)
@@ -225,15 +252,25 @@ class VariableEvaluator:
         except Exception as e:
             return str(e)
     
-    def get_referenced_registers(self, expression: str) -> List[int]:
-        """Get list of register addresses referenced in expression."""
-        addresses = []
+    def get_referenced_registers(self, expression: str) -> List[Tuple[int, int]]:
+        """Get list of (slave_id, address) tuples referenced in expression."""
+        refs = []
         
-        # Find R<address> references
-        reg_pattern = r'\bR(\d+)\b'
-        for match in re.finditer(reg_pattern, expression):
+        # Find D<id>.R<addr> references
+        full_pattern = r'\bD(\d+)\.R(\d+)\b'
+        for match in re.finditer(full_pattern, expression):
+            slave_id = int(match.group(1))
+            address = int(match.group(2))
+            ref = (slave_id, address)
+            if ref not in refs:
+                refs.append(ref)
+        
+        # Find legacy R<addr> references
+        legacy_pattern = r'(?<!\.)(?<!D\d)\bR(\d+)\b'
+        for match in re.finditer(legacy_pattern, expression):
             address = int(match.group(1))
-            if address not in addresses:
-                addresses.append(address)
+            ref = (1, address)  # Default to device 1
+            if ref not in refs:
+                refs.append(ref)
         
-        return addresses
+        return refs

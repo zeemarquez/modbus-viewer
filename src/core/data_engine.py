@@ -1,5 +1,6 @@
 """
 Data engine for polling Modbus registers and processing values.
+Supports multiple devices on the same serial bus.
 """
 
 import time
@@ -27,6 +28,7 @@ class DataEngine(QObject):
     """
     Engine for polling Modbus registers and emitting data updates.
     Runs polling in a dedicated background thread for maximum performance.
+    Supports multiple devices on the same serial bus.
     
     Signals:
         data_updated: Emitted when register values are updated
@@ -54,8 +56,9 @@ class DataEngine(QObject):
         self._poll_thread: Optional[threading.Thread] = None
         self._write_lock = threading.Lock()
         
-        # Data history for plotting (address/name -> deque of DataPoints)
-        self._history: Dict[str, deque] = {}  # Use string keys: "R0" for registers, "var_name" for variables
+        # Data history for plotting (designator -> deque of DataPoints)
+        # Keys are like "D1.R0" for registers, "var_name" for variables
+        self._history: Dict[str, deque] = {}
         self._history_max_seconds = 300  # 5 minutes max history
         
         # Statistics
@@ -64,9 +67,9 @@ class DataEngine(QObject):
         self._last_poll_duration = 0.0  # ms
         self._last_poll_time = 0.0
         
-        # Pre-calculated batches for faster polling
-        self._fast_batches: List[Tuple[int, int, List[Register]]] = []  # Polled at max speed
-        self._slow_batches: List[Tuple[int, int, List[Register]]] = []  # Polled every 500ms
+        # Pre-calculated batches for faster polling, grouped by (slave_id, fast_poll)
+        # Structure: Dict[slave_id, Dict['fast'|'slow', List[Tuple[start, count, regs]]]]
+        self._device_batches: Dict[int, Dict[str, List[Tuple[int, int, List[Register]]]]] = {}
         self._last_slow_poll_time = 0.0
         self._slow_poll_interval = 0.5  # 500ms for slow registers
     
@@ -85,23 +88,37 @@ class DataEngine(QObject):
         """Set registers to poll."""
         with self._write_lock:
             self.registers = registers
-            
-            # Split into fast and slow registers
-            fast_regs = [r for r in registers if r.fast_poll]
-            slow_regs = [r for r in registers if not r.fast_poll]
-            
-            # Pre-calculate batches for efficient reading
-            fast_sorted = sorted(fast_regs, key=lambda r: r.address)
-            slow_sorted = sorted(slow_regs, key=lambda r: r.address)
-            
-            self._fast_batches = self._group_registers(fast_sorted)
-            self._slow_batches = self._group_registers(slow_sorted)
+            self._rebuild_batches()
             
             # Initialize history for new registers
             for reg in registers:
-                key = f"R{reg.address}"
+                key = reg.designator  # e.g., "D1.R0"
                 if key not in self._history:
                     self._history[key] = deque()
+    
+    def _rebuild_batches(self) -> None:
+        """Rebuild polling batches grouped by slave_id."""
+        self._device_batches.clear()
+        
+        # Group registers by slave_id
+        by_device: Dict[int, List[Register]] = {}
+        for reg in self.registers:
+            if reg.slave_id not in by_device:
+                by_device[reg.slave_id] = []
+            by_device[reg.slave_id].append(reg)
+        
+        # For each device, split into fast and slow, then create batches
+        for slave_id, device_regs in by_device.items():
+            fast_regs = [r for r in device_regs if r.fast_poll]
+            slow_regs = [r for r in device_regs if not r.fast_poll]
+            
+            fast_sorted = sorted(fast_regs, key=lambda r: r.address)
+            slow_sorted = sorted(slow_regs, key=lambda r: r.address)
+            
+            self._device_batches[slave_id] = {
+                'fast': self._group_registers(fast_sorted),
+                'slow': self._group_registers(slow_sorted),
+            }
     
     def set_variables(self, variables: List[Variable]) -> None:
         """Set variables to evaluate."""
@@ -110,8 +127,9 @@ class DataEngine(QObject):
             self.variable_evaluator.set_registers(self.registers)
             # Initialize history for new variables
             for var in variables:
-                if var.name not in self._history:
-                    self._history[var.name] = deque()
+                key = var.designator
+                if key not in self._history:
+                    self._history[key] = deque()
     
     def start(self) -> None:
         """Start polling thread."""
@@ -156,7 +174,7 @@ class DataEngine(QObject):
             time.sleep(0.005)
     
     def _poll(self) -> bool:
-        """Single poll cycle."""
+        """Single poll cycle - polls all devices."""
         if not self.modbus or not self.modbus.is_connected:
             self._is_running = False
             self.connection_lost.emit()
@@ -166,15 +184,27 @@ class DataEngine(QObject):
         self._last_poll_time = now
         self._poll_count += 1
         
+        poll_slow = now - self._last_slow_poll_time >= self._slow_poll_interval
+        if poll_slow:
+            self._last_slow_poll_time = now
+        
         try:
             with self._write_lock:
-                # Always poll fast registers
-                self._poll_batches(self._fast_batches, now)
-                
-                # Poll slow registers every 500ms
-                if now - self._last_slow_poll_time >= self._slow_poll_interval:
-                    self._poll_batches(self._slow_batches, now)
-                    self._last_slow_poll_time = now
+                # Poll each device
+                for slave_id, batches in self._device_batches.items():
+                    try:
+                        # Always poll fast registers
+                        self._poll_device_batches(slave_id, batches['fast'], now)
+                        
+                        # Poll slow registers every 500ms
+                        if poll_slow:
+                            self._poll_device_batches(slave_id, batches['slow'], now)
+                    except Exception as e:
+                        # Device-specific error - don't stop the whole engine unless it's a serial port error
+                        if any(err in str(e).lower() for err in ["access is denied", "file not found", "device not found", "permissionerror"]):
+                            raise e
+                        # Otherwise just log it and continue to next device
+                        self._error_count += 1
                 
                 # Evaluate variables
                 for variable in self.variables:
@@ -182,12 +212,12 @@ class DataEngine(QObject):
                         value = self.variable_evaluator.evaluate(variable.expression)
                         variable.value = value
                         variable.error = None
-                        self._append_history(variable.name, value, now)
+                        self._append_history(variable.designator, value, now)
                     except Exception as e:
                         variable.value = None
                         variable.error = str(e)
         except Exception as e:
-            # If we get here, it's a critical serial error from _poll_batches
+            # If we get here, it's a critical serial error from _poll_device_batches
             self._is_running = False
             self.modbus.is_connected = False
             self.connection_lost.emit()
@@ -195,8 +225,8 @@ class DataEngine(QObject):
         
         return True
 
-    def _poll_batches(self, batches: List[Tuple[int, int, List[Register]]], now: float) -> None:
-        """Poll a list of register batches."""
+    def _poll_device_batches(self, slave_id: int, batches: List[Tuple[int, int, List[Register]]], now: float) -> None:
+        """Poll register batches for a specific device."""
         if not batches:
             return
         
@@ -204,12 +234,12 @@ class DataEngine(QObject):
             try:
                 if count == 1:
                     # Single register read
-                    raw_value = self.modbus.instrument.read_register(start_addr, 0)
+                    raw_value = self.modbus.read_register_single(slave_id, start_addr)
                     self._update_register_values(regs_in_group, [raw_value], start_addr, now)
                 else:
                     # Multi-register read
                     try:
-                        raw_values = self.modbus.instrument.read_registers(start_addr, count)
+                        raw_values = self.modbus.read_registers(slave_id, start_addr, count)
                         self._update_register_values(regs_in_group, raw_values, start_addr, now)
                     except Exception as e:
                         # Check for critical serial errors (like port unplugged)
@@ -219,12 +249,8 @@ class DataEngine(QObject):
                         # Fallback: if batch read fails, try individual reads
                         for reg in regs_in_group:
                             try:
-                                if reg.size == 1:
-                                    val = self.modbus.instrument.read_register(reg.address, 0)
-                                    self._update_register_values([reg], [val], reg.address, now)
-                                else:
-                                    vals = self.modbus.instrument.read_registers(reg.address, reg.size)
-                                    self._update_register_values([reg], vals, reg.address, now)
+                                val = self.modbus.read_register_single(slave_id, reg.address)
+                                self._update_register_values([reg], [val], reg.address, now)
                             except Exception as individual_e:
                                 if any(err in str(individual_e).lower() for err in ["access is denied", "file not found", "device not found", "permissionerror"]):
                                     raise individual_e
@@ -261,7 +287,7 @@ class DataEngine(QObject):
                 reg.error = None
                 reg.previous_value = reg.scaled_value
                 reg.scaled_value = reg.apply_scale(raw_val)
-                self._append_history(f"R{reg.address}", reg.scaled_value, now)
+                self._append_history(reg.designator, reg.scaled_value, now)
             except Exception as e:
                 reg.error = str(e)
 

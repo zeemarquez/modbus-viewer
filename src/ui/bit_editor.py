@@ -1,5 +1,6 @@
 """
 Bit editor dialog for creating/editing bit definitions.
+Supports multi-device with slave_id selection.
 """
 
 from typing import List, Optional
@@ -15,15 +16,17 @@ from src.models.register import Register
 
 
 class BitEditorDialog(QDialog):
-    """Dialog for creating or editing a bit definition."""
+    """Dialog for creating or editing a bit definition with multi-device support."""
     
     def __init__(self, bit: Optional[Bit] = None, 
                  registers: List[Register] = None,
                  parent=None):
         super().__init__(parent)
         
-        self.bit = bit.copy() if bit else Bit(name="", register_address=0, bit_index=0)
         self.registers = registers or []
+        
+        # Default bit definition (slave_id is set at runtime by main window)
+        self.bit = bit.copy() if bit else Bit(name="", register_address=0, bit_index=0)
         
         self.setWindowTitle("Edit Bit" if bit else "New Bit")
         self.setMinimumSize(400, 250)
@@ -77,21 +80,21 @@ class BitEditorDialog(QDialog):
     def _populate_register_combo(self) -> None:
         """Populate the register selection combo."""
         self.register_combo.clear()
+        
         for reg in self.registers:
             label = reg.label if reg.label else f"Address {reg.address}"
             self.register_combo.addItem(f"R{reg.address}: {label}", reg.address)
     
     def _populate_fields(self) -> None:
-        """Populate fields from bit."""
+        """Populate fields from bit definition."""
         self.name_edit.setText(self.bit.name)
         self.label_edit.setText(self.bit.label)
         self.bit_spin.setValue(self.bit.bit_index)
         
         # Set register selection
-        for i in range(self.register_combo.count()):
-            if self.register_combo.itemData(i) == self.bit.register_address:
-                self.register_combo.setCurrentIndex(i)
-                break
+        reg_index = self.register_combo.findData(self.bit.register_address)
+        if reg_index >= 0:
+            self.register_combo.setCurrentIndex(reg_index)
     
     def _validate(self) -> Optional[str]:
         """Validate the bit configuration."""
@@ -114,7 +117,7 @@ class BitEditorDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", error)
             return
         
-        # Update bit
+        # Update bit definition
         self.bit.name = self.name_edit.text().strip()
         self.bit.label = self.label_edit.text().strip()
         self.bit.register_address = self.register_combo.currentData()
@@ -125,4 +128,3 @@ class BitEditorDialog(QDialog):
     def get_bit(self) -> Bit:
         """Get the configured bit."""
         return self.bit
-

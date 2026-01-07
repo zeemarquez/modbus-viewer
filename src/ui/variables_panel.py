@@ -7,7 +7,7 @@ from typing import List
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QMessageBox
+    QAbstractItemView, QMessageBox, QTabWidget, QWidget
 )
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QColor, QBrush
@@ -29,9 +29,12 @@ class VariablesPanel(QFrame):
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
         self.setLineWidth(1)
         
-        self.variables: List[Variable] = []
-        self.registers: List[Register] = []
+        self.variable_definitions: List[Variable] = []
+        self.register_definitions: List[Register] = []
+        self.slave_ids: List[int] = [1]
+        self._live_variables: List[Variable] = []
         self.evaluator = VariableEvaluator()
+        self._device_tables: Dict[int, QTableWidget] = {}  # slave_id -> table (0 for Global)
         
         self._setup_ui()
         self._load_settings()
@@ -59,119 +62,154 @@ class VariablesPanel(QFrame):
         toolbar.addWidget(remove_btn)
         
         toolbar.addStretch()
-        
         layout.addLayout(toolbar)
         
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Name", "Label", "Value", "Expression"])
+        # Tab widget for devices + global
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+    def _create_table(self) -> QTableWidget:
+        """Create a standard variable table."""
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Label", "Value", "Expression"])
         
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(32)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(32)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        # Column sizing - allow interactive resizing
-        header = self.table.horizontalHeader()
+        # Column sizing
+        header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionsMovable(True)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Label stretches
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setStretchLastSection(False)
-        header.resizeSection(0, 100)  # Name
-        header.resizeSection(2, 80)   # Value
-        header.resizeSection(3, 150)  # Expression
+        header.resizeSection(1, 100)
+        header.resizeSection(2, 200)
         
-        # Double-click to edit
-        self.table.cellDoubleClicked.connect(self._on_double_click)
-        
-        layout.addWidget(self.table)
+        table.cellDoubleClicked.connect(self._on_double_click)
+        return table
 
-    def _load_settings(self) -> None:
-        """Load table settings."""
-        settings = QSettings()
-        header_state = settings.value("variables_panel/header_state")
-        if header_state:
-            self.table.horizontalHeader().restoreState(header_state)
-
-    def save_settings(self) -> None:
-        """Save table settings."""
-        settings = QSettings()
-        settings.setValue("variables_panel/header_state", self.table.horizontalHeader().saveState())
-    
     def set_registers(self, registers: List[Register]) -> None:
         """Set the available registers for expressions."""
-        self.registers = registers
+        self.register_definitions = registers
         self.evaluator.set_registers(registers)
     
     def set_variables(self, variables: List[Variable]) -> None:
-        """Set the list of variables to display."""
-        self.variables = [v.copy() for v in variables]
-        self._rebuild_table()
+        """Set the list of variable definitions."""
+        self.variable_definitions = [v.copy() for v in variables]
+        self._rebuild_tabs()
     
+    def set_slave_ids(self, slave_ids: List[int]) -> None:
+        """Set the connected slave IDs and rebuild tabs."""
+        self.slave_ids = slave_ids
+        self._rebuild_tabs()
+
     def get_variables(self) -> List[Variable]:
-        """Get the current list of variables."""
-        return [v.copy() for v in self.variables]
+        """Get the current variable definitions."""
+        return [v.copy() for v in self.variable_definitions]
+
+    def get_live_variables(self) -> List[Variable]:
+        """Get all live variable instances across all devices."""
+        return self._live_variables
     
-    def _rebuild_table(self) -> None:
-        """Rebuild the table with current variables."""
-        self.table.setRowCount(len(self.variables))
+    def _rebuild_tabs(self) -> None:
+        """Rebuild tabs for Global and Per-Device variables."""
+        self.tab_widget.clear()
+        self._device_tables.clear()
+        self._live_variables = []
         
-        for row, var in enumerate(self.variables):
-            self._set_row(row, var)
-    
-    def _set_row(self, row: int, var: Variable) -> None:
-        """Set a row in the table."""
-        # Name
-        name_item = QTableWidgetItem(var.name)
-        name_item.setData(Qt.ItemDataRole.UserRole, var)
-        self.table.setItem(row, 0, name_item)
+        # 1. Global Tab
+        global_table = self._create_table()
+        self._device_tables[0] = global_table
+        global_vars = [v for v in self.variable_definitions if v.is_global]
         
+        for v in global_vars:
+            live_v = v.copy()
+            self._live_variables.append(live_v)
+            
+        self._populate_table(global_table, global_vars)
+        self.tab_widget.addTab(global_table, "Global")
+        
+        # 2. Per-Device Tabs
+        device_vars = [v for v in self.variable_definitions if not v.is_global]
+        for sid in sorted(self.slave_ids):
+            table = self._create_table()
+            self._device_tables[sid] = table
+            
+            # Create live instances for this device
+            current_device_live = []
+            for v_def in device_vars:
+                live_v = v_def.copy()
+                live_v.slave_id = sid
+                # Contextualize expression for this device: R<addr> -> D<sid>.R<addr>
+                import re
+                live_v.expression = re.sub(r'(?<!\.)\bR(\d+)\b', f'D{sid}.R\\1', v_def.expression)
+                current_device_live.append(live_v)
+                self._live_variables.append(live_v)
+                
+            self._populate_table(table, current_device_live)
+            self.tab_widget.addTab(table, f"Device {sid}")
+
+    def _populate_table(self, table: QTableWidget, variables: List[Variable]) -> None:
+        """Populate a table with variables."""
+        table.setRowCount(len(variables))
+        for row, var in enumerate(variables):
+            self._set_row(table, row, var)
+
+    def _set_row(self, table: QTableWidget, row: int, var: Variable) -> None:
+        """Set a row in a specific table."""
         # Label
-        label_item = QTableWidgetItem(var.label)
-        self.table.setItem(row, 1, label_item)
+        display_text = var.label if var.label else var.name
+        label_item = QTableWidgetItem(display_text)
+        label_item.setData(Qt.ItemDataRole.UserRole, var)
+        table.setItem(row, 0, label_item)
         
         # Value
         value_item = QTableWidgetItem("---")
         value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.table.setItem(row, 2, value_item)
+        table.setItem(row, 1, value_item)
         
         # Expression
         expr_item = QTableWidgetItem(var.expression)
         expr_item.setForeground(QBrush(QColor(COLORS['text_secondary'])))
-        self.table.setItem(row, 3, expr_item)
+        table.setItem(row, 2, expr_item)
     
     def update_values(self) -> None:
-        """Update all variable values."""
-        for row, var in enumerate(self.variables):
-            if row >= self.table.rowCount():
-                break
-            
-            value_item = self.table.item(row, 2)
-            if value_item is None:
-                continue
-            
-            try:
-                value = self.evaluator.evaluate(var.expression)
-                var.value = value
-                var.error = None
-                formatted = var.format_value(value)
-                value_item.setText(formatted)
-                value_item.setForeground(QBrush(QColor(COLORS['text_primary'])))
-            except Exception as e:
-                var.value = None
-                var.error = str(e)
-                value_item.setText("Error")
-                value_item.setForeground(QBrush(QColor(COLORS['error'])))
-                value_item.setToolTip(str(e))
+        """Update all live variable values."""
+        # Map live variables to their table positions
+        for sid, table in self._device_tables.items():
+            for row in range(table.rowCount()):
+                var = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                if not var:
+                    continue
+                
+                value_item = table.item(row, 1)
+                if value_item is None:
+                    continue
+                
+                try:
+                    value = self.evaluator.evaluate(var.expression)
+                    var.value = value
+                    var.error = None
+                    formatted = var.format_value(value)
+                    value_item.setText(formatted)
+                    value_item.setForeground(QBrush(QColor(COLORS['text_primary'])))
+                except Exception as e:
+                    var.value = None
+                    var.error = str(e)
+                    value_item.setText("Error")
+                    value_item.setForeground(QBrush(QColor(COLORS['error'])))
+                    value_item.setToolTip(str(e))
     
     def _add_variable(self) -> None:
-        """Add a new variable."""
+        """Add a new variable definition."""
         dialog = VariableEditorDialog(
             variable=None,
-            registers=self.registers,
+            registers=self.register_definitions,
             evaluator=self.evaluator,
             parent=self
         )
@@ -179,8 +217,8 @@ class VariablesPanel(QFrame):
         if dialog.exec():
             var = dialog.get_variable()
             
-            # Check for duplicate name
-            for existing in self.variables:
+            # Check for duplicate name in definitions
+            for existing in self.variable_definitions:
                 if existing.name == var.name:
                     QMessageBox.warning(
                         self, 
@@ -189,29 +227,34 @@ class VariablesPanel(QFrame):
                     )
                     return
             
-            self.variables.append(var)
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self._set_row(row, var)
+            self.variable_definitions.append(var)
+            self._rebuild_tabs()
             self.update_values()
             self.variables_changed.emit()
     
     def _edit_variable(self) -> None:
-        """Edit selected variable."""
-        rows = self.table.selectedIndexes()
-        if not rows:
+        """Edit selected variable definition."""
+        current_table = self.tab_widget.currentWidget()
+        if not isinstance(current_table, QTableWidget):
             return
-        
-        row = rows[0].row()
-        if row >= len(self.variables):
+            
+        row = current_table.currentRow()
+        if row < 0:
             return
-        
-        var = self.variables[row]
-        old_name = var.name
-        
+            
+        # Get the variable (might be a live instance)
+        selected_var = current_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not selected_var:
+            return
+            
+        # Find original definition
+        var_def = next((v for v in self.variable_definitions if v.name == selected_var.name), None)
+        if not var_def:
+            return
+            
         dialog = VariableEditorDialog(
-            variable=var,
-            registers=self.registers,
+            variable=var_def,
+            registers=self.register_definitions,
             evaluator=self.evaluator,
             parent=self
         )
@@ -220,8 +263,8 @@ class VariablesPanel(QFrame):
             new_var = dialog.get_variable()
             
             # Check for duplicate name (excluding self)
-            for i, existing in enumerate(self.variables):
-                if i != row and existing.name == new_var.name:
+            for existing in self.variable_definitions:
+                if existing != var_def and existing.name == new_var.name:
                     QMessageBox.warning(
                         self,
                         "Duplicate Name",
@@ -229,36 +272,53 @@ class VariablesPanel(QFrame):
                     )
                     return
             
-            self.variables[row] = new_var
-            self._set_row(row, new_var)
+            # Update definition
+            idx = self.variable_definitions.index(var_def)
+            self.variable_definitions[idx] = new_var
+            
+            self._rebuild_tabs()
             self.update_values()
             self.variables_changed.emit()
     
     def _remove_variable(self) -> None:
-        """Remove selected variable."""
-        rows = self.table.selectedIndexes()
-        if not rows:
+        """Remove selected variable definition."""
+        current_table = self.tab_widget.currentWidget()
+        if not isinstance(current_table, QTableWidget):
             return
-        
-        row = rows[0].row()
-        if row >= len(self.variables):
+            
+        row = current_table.currentRow()
+        if row < 0:
             return
-        
-        var = self.variables[row]
+            
+        selected_var = current_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not selected_var:
+            return
+            
+        var_def = next((v for v in self.variable_definitions if v.name == selected_var.name), None)
+        if not var_def:
+            return
         
         reply = QMessageBox.question(
             self,
             "Remove Variable",
-            f"Remove variable '{var.name}'?",
+            f"Remove variable definition '{var_def.name}' for ALL devices?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            del self.variables[row]
-            self.table.removeRow(row)
+            self.variable_definitions.remove(var_def)
+            self._rebuild_tabs()
             self.variables_changed.emit()
     
     def _on_double_click(self, row: int, column: int) -> None:
         """Handle double-click on a cell."""
         self._edit_variable()
+
+    def _load_settings(self) -> None:
+        """Load table settings."""
+        pass
+
+    def save_settings(self) -> None:
+        """Save table settings."""
+        pass
 

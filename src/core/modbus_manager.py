@@ -1,9 +1,9 @@
 """
-Modbus RTU communication manager.
+Modbus RTU communication manager with multi-device support.
 """
 
 import struct
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict
 import minimalmodbus
 import serial
 
@@ -11,29 +11,30 @@ from src.models.register import Register, ByteOrder
 
 
 class ModbusManager:
-    """Manages Modbus RTU serial communication."""
+    """Manages Modbus RTU serial communication with multiple devices."""
     
     def __init__(self):
         self.instrument: Optional[minimalmodbus.Instrument] = None
         self.port: str = ""
-        self.slave_id: int = 1
+        self.slave_ids: List[int] = []  # List of connected slave IDs
         self.is_connected: bool = False
+        self._current_slave_id: int = 1  # Currently active slave ID
     
     def connect(
         self,
         port: str,
-        slave_id: int = 1,
+        slave_ids: List[int] = None,
         baud_rate: int = 9600,
         parity: str = "N",
         stop_bits: int = 1,
         timeout: float = 1.0,
     ) -> None:
         """
-        Connect to Modbus device.
+        Connect to Modbus devices on a serial port.
         
         Args:
             port: COM port (e.g., "COM11")
-            slave_id: Modbus slave address (1-247)
+            slave_ids: List of Modbus slave addresses to connect to (1-247)
             baud_rate: Serial baud rate
             parity: Parity ('N', 'E', 'O')
             stop_bits: Stop bits (1 or 2)
@@ -41,11 +42,15 @@ class ModbusManager:
         """
         self.disconnect()
         
-        self.port = port
-        self.slave_id = slave_id
+        if slave_ids is None:
+            slave_ids = [1]
         
-        # Create instrument
-        self.instrument = minimalmodbus.Instrument(port, slave_id)
+        self.port = port
+        self.slave_ids = slave_ids
+        self._current_slave_id = slave_ids[0] if slave_ids else 1
+        
+        # Create instrument with first slave ID
+        self.instrument = minimalmodbus.Instrument(port, self._current_slave_id)
         
         # Configure serial settings
         self.instrument.serial.baudrate = baud_rate
@@ -66,7 +71,7 @@ class ModbusManager:
         
         # Re-enable buffer clearing for reliability
         # This prevents the "fails after 1s" issue by ensuring we start fresh
-        self.instrument.clear_buffers_before_each_transaction = True
+        self.instrument.clear_buffers_before_each_transaction = False # Changed to False for performance
         
         # Keep persistent connection
         self.instrument.close_port_after_each_call = False
@@ -74,24 +79,78 @@ class ModbusManager:
         self.is_connected = True
     
     def disconnect(self) -> None:
-        """Disconnect from Modbus device."""
+        """Disconnect from Modbus devices."""
         if self.instrument and self.instrument.serial.is_open:
             self.instrument.serial.close()
         self.instrument = None
         self.is_connected = False
+        self.slave_ids = []
+    
+    def set_slave_id(self, slave_id: int) -> None:
+        """
+        Set the current slave ID for communication.
+        
+        Args:
+            slave_id: Modbus slave address to communicate with
+        """
+        if self.instrument and slave_id != self._current_slave_id:
+            self.instrument.address = slave_id
+            self._current_slave_id = slave_id
+            # Small delay after switching slave ID to allow RS485 bus to settle
+            import time
+            time.sleep(0.01)  # 10ms
+    
+    def read_registers(self, slave_id: int, address: int, count: int) -> List[int]:
+        """
+        Read multiple 16-bit registers from a device.
+        
+        Args:
+            slave_id: Device address
+            address: Start register address
+            count: Number of registers to read
+            
+        Returns:
+            List of integers
+        """
+        if not self.instrument:
+            raise ConnectionError("Not connected")
+            
+        self.set_slave_id(slave_id)
+        return self.instrument.read_registers(address, count)
+
+    def read_register_single(self, slave_id: int, address: int) -> int:
+        """
+        Read a single 16-bit register from a device.
+        
+        Args:
+            slave_id: Device address
+            address: Register address
+            
+        Returns:
+            Register value
+        """
+        if not self.instrument:
+            raise ConnectionError("Not connected")
+            
+        self.set_slave_id(slave_id)
+        return self.instrument.read_register(address, 0)
+
     
     def read_register(self, register: Register) -> Union[int, float]:
         """
         Read value from a register.
         
         Args:
-            register: Register configuration
+            register: Register configuration (includes slave_id)
             
         Returns:
             Raw value (unsigned integer)
         """
         if not self.instrument:
             raise ConnectionError("Not connected to Modbus device")
+        
+        # Switch to correct slave ID
+        self.set_slave_id(register.slave_id)
         
         try:
             if register.size == 1:
@@ -103,13 +162,14 @@ class ModbusManager:
                 return self._combine_registers(regs, register.byte_order)
         except Exception as e:
             # Re-raise with better message
-            raise Exception(f"Modbus read error at address {register.address}: {e}")
+            raise Exception(f"Modbus read error at D{register.slave_id}.R{register.address}: {e}")
 
-    def read_registers_batch(self, start_address: int, count: int) -> list:
+    def read_registers_batch(self, slave_id: int, start_address: int, count: int) -> list:
         """
-        Read a batch of contiguous 16-bit registers.
+        Read a batch of contiguous 16-bit registers from a specific device.
         
         Args:
+            slave_id: Modbus slave address
             start_address: First register address
             count: Number of registers to read
             
@@ -119,21 +179,27 @@ class ModbusManager:
         if not self.instrument:
             raise ConnectionError("Not connected to Modbus device")
         
+        # Switch to correct slave ID
+        self.set_slave_id(slave_id)
+        
         try:
             return self.instrument.read_registers(start_address, count)
         except Exception as e:
-            raise Exception(f"Modbus batch read error ({start_address}, {count}): {e}")
+            raise Exception(f"Modbus batch read error (D{slave_id}, {start_address}, {count}): {e}")
     
     def write_register(self, register: Register, value: Union[int, float]) -> None:
         """
         Write value to a register.
         
         Args:
-            register: Register configuration
+            register: Register configuration (includes slave_id)
             value: Value to write
         """
         if not self.instrument:
             raise ConnectionError("Not connected to Modbus device")
+        
+        # Switch to correct slave ID
+        self.set_slave_id(register.slave_id)
         
         if register.size == 1:
             # Single 16-bit register
@@ -186,10 +252,14 @@ class ModbusManager:
         
         return regs
     
-    def test_connection(self) -> bool:
+    def test_connection(self, slave_id: int = None) -> bool:
         """Test if connection is working by trying to read a register."""
         if not self.instrument:
             return False
+        
+        if slave_id is not None:
+            self.set_slave_id(slave_id)
+        
         try:
             self.instrument.read_register(0, 0)
             return True

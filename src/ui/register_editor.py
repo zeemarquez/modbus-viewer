@@ -1,5 +1,6 @@
 """
 Register editor dialog for configuring register maps.
+Supports multi-device with slave_id column.
 """
 
 from typing import List, Optional
@@ -19,7 +20,7 @@ from src.models.register import (
 
 
 class RegisterEditorDialog(QDialog):
-    """Dialog for editing register configuration."""
+    """Dialog for editing common register definitions."""
     
     def __init__(self, registers: List[Register], parent=None):
         super().__init__(parent)
@@ -117,7 +118,7 @@ class RegisterEditorDialog(QDialog):
             self.restoreGeometry(geometry)
             
         # Restore header state
-        header_state = settings.value("register_editor/header_state")
+        header_state = settings.value("register_editor/header_state_v2")
         if header_state:
             self.table.horizontalHeader().restoreState(header_state)
 
@@ -125,7 +126,7 @@ class RegisterEditorDialog(QDialog):
         """Save dialog settings."""
         settings = QSettings()
         settings.setValue("register_editor/geometry", self.saveGeometry())
-        settings.setValue("register_editor/header_state", self.table.horizontalHeader().saveState())
+        settings.setValue("register_editor/header_state_v2", self.table.horizontalHeader().saveState())
 
     def done(self, result: int) -> None:
         """Override done to save settings."""
@@ -223,12 +224,15 @@ class RegisterEditorDialog(QDialog):
         )
     
     def _add_register(self) -> None:
-        """Add a new register."""
+        """Add a new register definition."""
         row = self.table.rowCount()
         self.table.insertRow(row)
         
         # Create default register
-        reg = Register(address=row, label=f"Register {row + 1}")
+        reg = Register(
+            address=row,
+            label=f"Register {row + 1}"
+        )
         self._set_row(row, reg)
         
         # Select new row
@@ -357,15 +361,15 @@ class RegisterEditorDialog(QDialog):
     
     def _validate(self) -> Optional[str]:
         """Validate all registers. Returns error message or None."""
-        addresses = set()
+        seen_addresses = set()
         
         for row in range(self.table.rowCount()):
             reg = self._get_row(row)
             
             # Check for duplicate addresses
-            if reg.address in addresses:
-                return f"Duplicate address {reg.address} at row {row + 1}"
-            addresses.add(reg.address)
+            if reg.address in seen_addresses:
+                return f"Duplicate address R{reg.address} at row {row + 1}"
+            seen_addresses.add(reg.address)
         
         return None
     

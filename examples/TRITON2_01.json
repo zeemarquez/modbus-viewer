@@ -2,11 +2,18 @@
   "version": "1.0",
   "connection": {
     "port": "COM11",
-    "slave_id": 2,
-    "baud_rate": 230400,
+    "slave_ids": [
+      1,
+      4
+    ],
+    "baud_rate": 115200,
     "parity": "N",
     "stop_bits": 1,
-    "timeout": 1.0
+    "timeout": 1.0,
+    "found_devices": [
+      1,
+      4
+    ]
   },
   "registers": [
     {
@@ -222,22 +229,11 @@
   ],
   "variables": [
     {
-      "name": "CH1",
+      "name": "ch1",
       "label": "ch1",
       "expression": "R18/R12",
-      "format": "decimal"
-    },
-    {
-      "name": "KALMAN_Q",
-      "label": "kalman_q",
-      "expression": "R50/R54",
-      "format": "decimal"
-    },
-    {
-      "name": "KALMAN_R",
-      "label": "kalman_r",
-      "expression": "R52/R54",
-      "format": "decimal"
+      "format": "decimal",
+      "is_global": false
     }
   ],
   "bits": [
@@ -281,7 +277,8 @@
   "views": {
     "plot_registers": [],
     "plot_variables": [
-      "CH1"
+      "D1.ch1",
+      "D4.ch1"
     ],
     "plot_time_window": 60,
     "poll_interval": 100,
@@ -290,10 +287,10 @@
       "grid_alpha": 0.1,
       "show_legend": true,
       "time_window_index": 2,
-      "y_auto_scale": false,
+      "y_auto_scale": true,
       "y_min": 0.0,
       "y_max": 220.0
     }
   },
-  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAADdAAADifwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsBAAAAUwAAA4kAAAJCAP///wAAAAEAAAabAAADifwCAAAAAfwAAABTAAADiQAAARgA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAADlAAADmgAAAX8A////+gAAAAECAAAAAvsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG+wAAABAAUABsAG8AdABEAG8AYwBrAQAAAFIAAAOKAAAAggD////8AAAEgwAAAv0AAADYAP////wCAAAAAvsAAAAaAFIAZQBnAGkAcwB0AGUAcgBzAEQAbwBjAGsBAAAAUwAAAcoAAAB+AP////wAAAIhAAABuwAAAJYBAAAX+gAAAAEBAAAAAvsAAAAaAFYAYQByAGkAYQBiAGwAZQBzAEQAbwBjAGsBAAAAAP////8AAADYAP////sAAAAQAEIAaQB0AHMARABvAGMAawEAAAVHAAACOQAAANgA////AAAAAAAAA4kAAAAEAAAABAAAAAgAAAAI/AAAAAEAAAACAAAAAQAAABYATQBhAGkAbgBUAG8AbwBsAGIAYQByAQAAAAD/////AAAAAAAAAAA="
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAEYAAADivwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsAAAAAUgAAA4oAAAKsAP///wAAAAEAAAd8AAADivwCAAAAAfwAAABSAAADigAAAVQA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAAAEAAAFHAAAAAAA////+gAAAAACAAAAAfsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG/AAAAAQAAAd8AAACpQD////8AQAAAAL7AAAAEABQAGwAbwB0AEQAbwBjAGsBAAAABAAABTIAAAHJAP////wAAAU6AAACRgAAANgA/////AIAAAAC+wAAABoAUgBlAGcAaQBzAHQAZQByAHMARABvAGMAawEAAABSAAAB1AAAAJwA/////AAAAioAAAGyAAAAtAEAABf6AAAAAQEAAAAC+wAAABoAVgBhAHIAaQBhAGIAbABlAHMARABvAGMAawEAAAU6AAACRgAAANgA////+wAAABAAQgBpAHQAcwBEAG8AYwBrAQAAAAD/////AAAA2AD///8AAAAAAAADigAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAFgBNAGEAaQBuAFQAbwBvAGwAYgBhAHIBAAAAAP////8AAAAAAAAAAA=="
 }

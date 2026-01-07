@@ -37,11 +37,19 @@ class Register:
     display_format: DisplayFormat = DisplayFormat.DECIMAL
     fast_poll: bool = False  # If True, poll at maximum speed
     
+    # Runtime/context attributes
+    slave_id: int = 1
+    
     # Runtime values (not serialized)
     raw_value: Optional[int] = field(default=None, repr=False)
     scaled_value: Optional[float] = field(default=None, repr=False)
     previous_value: Optional[float] = field(default=None, repr=False)
     error: Optional[str] = field(default=None, repr=False)
+
+    @property
+    def designator(self) -> str:
+        """Get the full designator (e.g., D1.R13)."""
+        return f"D{self.slave_id}.R{self.address}"
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -130,4 +138,5 @@ class Register:
             access_mode=self.access_mode,
             display_format=self.display_format,
             fast_poll=self.fast_poll,
+            slave_id=self.slave_id,
         )

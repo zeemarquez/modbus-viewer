@@ -1,5 +1,6 @@
 """
 Real-time plot view for register values using pyqtgraph.
+Supports multi-device with designator format D<id>.R<addr>.
 """
 
 from typing import List, Dict, Optional
@@ -9,7 +10,7 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QComboBox, QLabel
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 import pyqtgraph as pg
 
@@ -43,13 +44,15 @@ PLOT_COLORS = [
 class PlotView(QFrame):
     """Widget for real-time plotting of register and variable values."""
     
+    maximize_requested = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
         self.setLineWidth(1)
         self.registers: List[Register] = []
         self.variables: List[Variable] = []
-        self._plot_items: Dict[str, pg.PlotDataItem] = {}  # Key: "R0" or "var_name"
+        self._plot_items: Dict[str, pg.PlotDataItem] = {}  # Key: "D1.R0" or "var_name"
         self._time_window = 60.0  # seconds
         self._is_paused = False
         
@@ -100,6 +103,12 @@ class PlotView(QFrame):
         self.options_btn.setFixedWidth(60)
         self.options_btn.clicked.connect(self._show_options)
         toolbar.addWidget(self.options_btn)
+        
+        self.maximize_btn = QPushButton("🗖")
+        self.maximize_btn.setFixedWidth(30)
+        self.maximize_btn.setToolTip("Maximize plot to independent window")
+        self.maximize_btn.clicked.connect(self.maximize_requested.emit)
+        toolbar.addWidget(self.maximize_btn)
         
         layout.addLayout(toolbar)
         
@@ -195,29 +204,23 @@ class PlotView(QFrame):
     def set_registers(self, registers: List[Register]) -> None:
         """Set the list of registers available for plotting."""
         self.registers = registers
-        # Remove plot items for registers that no longer exist
-        current_addresses = {reg.address for reg in registers}
-        keys_to_remove = [
-            k for k in self._plot_items.keys() 
-            if k.startswith('R') and int(k[1:]) not in current_addresses
-        ]
-        for key in keys_to_remove:
-            self.plot_widget.removeItem(self._plot_items[key])
-            del self._plot_items[key]
-    
+        self._sync_plot_items()
+
     def set_variables(self, variables: List[Variable]) -> None:
         """Set the list of variables available for plotting."""
         self.variables = variables
-        # Remove plot items for variables that no longer exist
-        current_names = {var.name for var in variables}
-        keys_to_remove = [
-            k for k in self._plot_items.keys() 
-            if not k.startswith('R') and k not in current_names
-        ]
+        self._sync_plot_items()
+
+    def _sync_plot_items(self) -> None:
+        """Sync plot items with current registers and variables."""
+        # Get all valid designators
+        all_valid = {reg.designator for reg in self.registers} | {var.designator for var in self.variables}
+        
+        # Remove plot items for designators that no longer exist
+        keys_to_remove = [k for k in self._plot_items.keys() if k not in all_valid]
         for key in keys_to_remove:
             self.plot_widget.removeItem(self._plot_items[key])
             del self._plot_items[key]
-    
     
     def _on_time_window_changed(self, index: int) -> None:
         """Handle time window change."""
@@ -257,79 +260,65 @@ class PlotView(QFrame):
         for plot_item in self._plot_items.values():
             plot_item.setData([], [])
     
-    def get_selected_registers(self) -> List[int]:
-        """Get list of selected register addresses."""
-        selected = []
-        for key in self._plot_items.keys():
-            if key.startswith('R'):
-                address = int(key[1:])
-                selected.append(address)
-        return selected
+    def get_selected_registers(self) -> List[str]:
+        """Get list of selected register designators (e.g., ['D1.R0', 'D2.R5'])."""
+        reg_designators = {reg.designator for reg in self.registers}
+        return [k for k in self._plot_items.keys() if k in reg_designators]
     
     def get_selected_variables(self) -> List[str]:
-        """Get list of selected variable names."""
-        selected = []
-        for key in self._plot_items.keys():
-            if not key.startswith('R'):
-                selected.append(key)
-        return selected
+        """Get list of selected variable designators."""
+        var_designators = {var.designator for var in self.variables}
+        return [k for k in self._plot_items.keys() if k in var_designators]
     
-    def set_selected_registers(self, addresses: List[int]) -> None:
-        """Set which registers are selected for plotting."""
-        # Remove plots for unselected registers
+    def set_selected_registers(self, designators: List[str]) -> None:
+        """Set which registers are selected for plotting by designator."""
+        # Remove plots for registers no longer in designators list
+        reg_designators = {reg.designator for reg in self.registers}
         for key in list(self._plot_items.keys()):
-            if key.startswith('R'):
-                address = int(key[1:])
-                if address not in addresses:
-                    self.plot_widget.removeItem(self._plot_items[key])
-                    del self._plot_items[key]
+            if key in reg_designators and key not in designators:
+                self.plot_widget.removeItem(self._plot_items[key])
+                del self._plot_items[key]
         
         # Add plots for newly selected registers
-        for address in addresses:
-            key = f"R{address}"
-            if key not in self._plot_items:
-                # Find register to get label and color index
-                reg = None
-                for r in self.registers:
-                    if r.address == address:
-                        reg = r
-                        break
+        for designator in designators:
+            if designator not in self._plot_items:
+                # Find register by designator
+                reg = next((r for r in self.registers if r.designator == designator), None)
                 
                 if reg:
                     color_index = self.registers.index(reg) % len(PLOT_COLORS)
                     color = PLOT_COLORS[color_index]
                     pen = pg.mkPen(color=color, width=self._line_width)
-                    label = reg.label or f"R{address}"
+                    label = f"D{reg.slave_id}.{reg.label}" if reg.label else designator
                     
                     plot_item = self.plot_widget.plot([], [], pen=pen, name=label)
-                    self._plot_items[key] = plot_item
+                    self._plot_items[designator] = plot_item
     
-    def set_selected_variables(self, names: List[str]) -> None:
-        """Set which variables are selected for plotting."""
-        # Remove plots for unselected variables
+    def set_selected_variables(self, designators: List[str]) -> None:
+        """Set which variables are selected for plotting by designator."""
+        # Remove plots for variables no longer in designators list
+        var_designators = {var.designator for var in self.variables}
         for key in list(self._plot_items.keys()):
-            if not key.startswith('R') and key not in names:
+            if key in var_designators and key not in designators:
                 self.plot_widget.removeItem(self._plot_items[key])
                 del self._plot_items[key]
         
         # Add plots for newly selected variables
-        for name in names:
-            if name not in self._plot_items:
-                # Find variable to get label and color index
-                var = None
-                for v in self.variables:
-                    if v.name == name:
-                        var = v
-                        break
+        for designator in designators:
+            if designator not in self._plot_items:
+                # Find variable by designator
+                var = next((v for v in self.variables if v.designator == designator), None)
                 
                 if var:
                     color_index = (self.variables.index(var) + len(self.registers)) % len(PLOT_COLORS)
                     color = PLOT_COLORS[color_index]
                     pen = pg.mkPen(color=color, width=self._line_width)
                     label = var.label or var.name
+                    if not var.is_global and var.slave_id:
+                        label = f"D{var.slave_id}.{label}"
                     
                     plot_item = self.plot_widget.plot([], [], pen=pen, name=label)
-                    self._plot_items[name] = plot_item
+                    self._plot_items[designator] = plot_item
     
     def get_plot_options(self) -> PlotOptions:
         """Get current plot options."""

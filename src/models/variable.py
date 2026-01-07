@@ -23,6 +23,10 @@ class Variable:
     label: str = ""
     expression: str = ""
     format: VariableFormat = VariableFormat.DECIMAL
+    is_global: bool = True
+    
+    # Runtime context
+    slave_id: Optional[int] = None
     
     # Runtime values (not serialized)
     value: Optional[float] = field(default=None, repr=False)
@@ -35,6 +39,7 @@ class Variable:
             "label": self.label,
             "expression": self.expression,
             "format": self.format.value,
+            "is_global": self.is_global,
         }
     
     @classmethod
@@ -45,6 +50,7 @@ class Variable:
             label=data.get("label", ""),
             expression=data.get("expression", ""),
             format=VariableFormat(data.get("format", "decimal")),
+            is_global=data.get("is_global", True),
         )
     
     def format_value(self, value: Optional[float]) -> str:
@@ -77,5 +83,14 @@ class Variable:
             label=self.label,
             expression=self.expression,
             format=self.format,
+            is_global=self.is_global,
+            slave_id=self.slave_id,
         )
+
+    @property
+    def designator(self) -> str:
+        """Get unique designator for this variable (includes slave_id if not global)."""
+        if self.is_global:
+            return self.name
+        return f"D{self.slave_id}.{self.name}" if self.slave_id else self.name
 

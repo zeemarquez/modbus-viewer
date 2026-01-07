@@ -1,5 +1,5 @@
 """
-Main application window.
+Main application window with multi-device support.
 """
 
 import os
@@ -28,7 +28,7 @@ from src.ui.styles import COLORS
 
 
 class MainWindow(QMainWindow):
-    """Main application window with dockable panels."""
+    """Main application window with dockable panels and multi-device support."""
     
     def __init__(self, initial_project_path: str = None):
         super().__init__()
@@ -38,6 +38,10 @@ class MainWindow(QMainWindow):
         self.modbus = ModbusManager()
         self.data_engine = DataEngine()
         self.data_engine.modbus = self.modbus
+        
+        # Track found devices from scan
+        self._found_devices: list = []
+        self._connected_slave_ids: list = []
         
         # Setup UI
         self.setWindowTitle("Modbus Viewer")
@@ -168,13 +172,18 @@ class MainWindow(QMainWindow):
         
         toolbar.addSeparator()
         
-        # Slave ID
-        toolbar.addWidget(QLabel(" Slave ID: "))
-        self.slave_spin = QSpinBox()
-        self.slave_spin.setRange(1, 247)
-        self.slave_spin.setValue(1)
-        self.slave_spin.setFixedWidth(60)
-        toolbar.addWidget(self.slave_spin)
+        # Device Selection (multi-select dropdown)
+        self.device_btn = QToolButton()
+        self.device_btn.setText("Select Devices")
+        self.device_btn.setMinimumWidth(150)
+        self.device_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.device_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.device_btn.setToolTip("Select devices to connect to (multi-select)")
+        
+        self.device_menu = QMenu(self)
+        self.device_menu.aboutToHide.connect(self._on_device_menu_about_to_hide)
+        self.device_btn.setMenu(self.device_menu)
+        toolbar.addWidget(self.device_btn)
         
         toolbar.addSeparator()
         
@@ -283,6 +292,93 @@ class MainWindow(QMainWindow):
             index = self.port_combo.findData(current)
             if index >= 0:
                 self.port_combo.setCurrentIndex(index)
+
+    def _update_device_menu(self) -> None:
+        """Update the device selection menu with found devices."""
+        self.device_menu.clear()
+        
+        if not self._found_devices:
+            self.device_btn.setText("Run Scan")
+            no_devices_action = QAction("No devices found - run scan first", self)
+            no_devices_action.setEnabled(False)
+            self.device_menu.addAction(no_devices_action)
+            return
+        
+        # Add select all / deselect all actions
+        select_all_action = QAction("Select All", self)
+        select_all_action.triggered.connect(self._select_all_devices)
+        self.device_menu.addAction(select_all_action)
+        
+        deselect_all_action = QAction("Deselect All", self)
+        deselect_all_action.triggered.connect(self._deselect_all_devices)
+        self.device_menu.addAction(deselect_all_action)
+        
+        self.device_menu.addSeparator()
+        
+        # Add checkable action for each device
+        for slave_id in sorted(self._found_devices):
+            action = QAction(f"Device {slave_id}", self)
+            action.setCheckable(True)
+            action.setChecked(slave_id in self._connected_slave_ids)
+            action.setData(slave_id)
+            action.triggered.connect(lambda checked, sid=slave_id: self._on_device_toggled(sid, checked))
+            self.device_menu.addAction(action)
+        
+        self._update_device_btn_text()
+    
+    def _update_device_btn_text(self) -> None:
+        """Update the device button text based on selection."""
+        selected = self._get_selected_slave_ids()
+        if not selected:
+            if self._found_devices:
+                self.device_btn.setText("Select Devices")
+            else:
+                self.device_btn.setText("Run Scan")
+        elif len(selected) == 1:
+            self.device_btn.setText(f"Device {selected[0]}")
+        else:
+            self.device_btn.setText(f"{len(selected)} Devices")
+    
+    def _get_selected_slave_ids(self) -> list:
+        """Get the list of selected slave IDs from the menu."""
+        selected = []
+        for action in self.device_menu.actions():
+            if action.isCheckable() and action.isChecked():
+                slave_id = action.data()
+                if slave_id is not None:
+                    selected.append(slave_id)
+        return sorted(selected)
+    
+    def _on_device_toggled(self, slave_id: int, checked: bool) -> None:
+        """Handle device selection toggle."""
+        if checked:
+            if slave_id not in self._connected_slave_ids:
+                self._connected_slave_ids.append(slave_id)
+        else:
+            if slave_id in self._connected_slave_ids:
+                self._connected_slave_ids.remove(slave_id)
+        self._connected_slave_ids.sort()
+        self._update_device_btn_text()
+    
+    def _select_all_devices(self) -> None:
+        """Select all devices."""
+        self._connected_slave_ids = self._found_devices.copy()
+        for action in self.device_menu.actions():
+            if action.isCheckable():
+                action.setChecked(True)
+        self._update_device_btn_text()
+    
+    def _deselect_all_devices(self) -> None:
+        """Deselect all devices."""
+        self._connected_slave_ids = []
+        for action in self.device_menu.actions():
+            if action.isCheckable():
+                action.setChecked(False)
+        self._update_device_btn_text()
+    
+    def _on_device_menu_about_to_hide(self) -> None:
+        """Called when device menu is about to hide - sync selected devices."""
+        self._connected_slave_ids = self._get_selected_slave_ids()
 
     def _setup_status_bar(self) -> None:
         """Setup status bar."""
@@ -447,6 +543,15 @@ class MainWindow(QMainWindow):
         # Bits panel
         self.bits_panel.bits_changed.connect(self._on_bits_changed)
         self.bits_panel.bit_value_changed.connect(self._on_bit_value_changed)
+        
+        # Plot view
+        self.plot_view.maximize_requested.connect(self._on_plot_maximize_requested)
+    
+    def _on_plot_maximize_requested(self) -> None:
+        """Maximize plot as independent window."""
+        self.plot_dock.setFloating(True)
+        self.plot_dock.showMaximized()
+        self.plot_dock.raise_()
     
     def _load_settings(self) -> None:
         """Load window settings (geometry only, layout comes from project)."""
@@ -488,6 +593,9 @@ class MainWindow(QMainWindow):
         """Create new project."""
         self.data_engine.stop()
         self.project = Project()
+        self._found_devices = []
+        self._connected_slave_ids = []
+        self._update_device_menu()
         self._update_ui_from_project()
         self.setWindowTitle("Modbus Viewer - Untitled")
     
@@ -508,6 +616,7 @@ class MainWindow(QMainWindow):
         try:
             self.data_engine.stop()
             self.project = Project.load(file_path)
+            
             self._update_ui_from_project()
             self.setWindowTitle(f"Modbus Viewer - {self.project.name}")
             
@@ -568,18 +677,37 @@ class MainWindow(QMainWindow):
             self._update_register_count()
     
     def _sync_registers(self) -> None:
-        """Sync registers to all components."""
-        self.data_engine.set_registers(self.project.registers)
+        """Sync registers to all components by creating live instances per device."""
+        slave_ids = self._connected_slave_ids if self._connected_slave_ids else [1]
+        
+        # 1. Update Table View and Bits Panel definitions first
         self.table_view.set_registers(self.project.registers)
-        self.plot_view.set_registers(self.project.registers)
-        self.variables_panel.set_registers(self.project.registers)
+        self.table_view.set_slave_ids(slave_ids)
+        
         self.bits_panel.set_registers(self.project.registers)
-        self.speed_test_panel.set_registers(self.project.registers)
+        
+        # 2. Get live instances that were just created
+        live_registers = self.table_view.get_live_registers()
+        
+        # 3. Propagate live instances to other components
+        self.data_engine.set_registers(live_registers)
+        self.plot_view.set_registers(live_registers)
+        
+        # Variables panel needs definitions and slave IDs
+        self.variables_panel.set_registers(live_registers)
+        self.variables_panel.set_variables(self.project.variables)
+        self.variables_panel.set_slave_ids(slave_ids)
+        
+        # Bits panel needs live registers for value lookup
+        self.bits_panel.set_slave_ids(slave_ids, live_registers)
+        
+        self.speed_test_panel.set_registers(live_registers)
     
     def _sync_variables(self) -> None:
-        """Sync variables to all components."""
-        self.data_engine.set_variables(self.project.variables)
-        self.plot_view.set_variables(self.project.variables)
+        """Sync variables to all components using live instances from panel."""
+        live_variables = self.variables_panel.get_live_variables()
+        self.data_engine.set_variables(live_variables)
+        self.plot_view.set_variables(live_variables)
     
     def _sync_bits(self) -> None:
         """Sync bits to all components."""
@@ -595,17 +723,23 @@ class MainWindow(QMainWindow):
     def _get_connection_settings(self) -> ConnectionSettings:
         """Get current connection settings from toolbar."""
         parity_map = {"None": "N", "Even": "E", "Odd": "O"}
+        
+        # Get selected slave IDs from menu (sync first)
+        self._connected_slave_ids = self._get_selected_slave_ids()
+        slave_ids = self._connected_slave_ids if self._connected_slave_ids else []
+        
         return ConnectionSettings(
             port=self.port_combo.currentData() or "",
-            slave_id=self.slave_spin.value(),
+            slave_ids=slave_ids,
             baud_rate=int(self.baud_combo.currentText()),
             parity=parity_map.get(self.parity_combo.currentText(), "N"),
             stop_bits=int(self.stopbits_combo.currentText()),
             timeout=self.timeout_spin.value() / 1000.0,
+            found_devices=self._found_devices.copy(),
         )
 
     def _connect(self) -> None:
-        """Connect to Modbus device."""
+        """Connect to Modbus devices."""
         settings = self._get_connection_settings()
         
         if not settings.port:
@@ -613,10 +747,15 @@ class MainWindow(QMainWindow):
             self.connect_action.setChecked(False)
             return
         
+        if not settings.slave_ids:
+            QMessageBox.warning(self, "Warning", "Please scan for devices first or configure slave IDs")
+            self.connect_action.setChecked(False)
+            return
+        
         try:
             self.modbus.connect(
                 port=settings.port,
-                slave_id=settings.slave_id,
+                slave_ids=settings.slave_ids,
                 baud_rate=settings.baud_rate,
                 parity=settings.parity,
                 stop_bits=settings.stop_bits,
@@ -624,10 +763,14 @@ class MainWindow(QMainWindow):
             )
             
             self.project.connection = settings
-            self.connection_label.setText(f"🟢 Connected: {settings.port}")
+            device_str = ", ".join(str(s) for s in settings.slave_ids)
+            self.connection_label.setText(f"🟢 Connected: {settings.port} (D{device_str})")
             self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
             self.speed_test_panel.set_connected(True)
             self.connect_action.setText("Disconnect")
+            
+            # Update device combo to show connected status
+            self._update_device_menu()
             
             # Disable settings while connected
             self._set_connection_widgets_enabled(False)
@@ -642,9 +785,10 @@ class MainWindow(QMainWindow):
             self.connect_action.setChecked(False)
     
     def _disconnect(self) -> None:
-        """Disconnect from Modbus device."""
+        """Disconnect from Modbus devices."""
         self.data_engine.stop()
         self.modbus.disconnect()
+        # Keep the device selection so user can easily reconnect
         self.connection_label.setText("🔴 Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
         self.speed_test_panel.set_connected(False)
@@ -657,7 +801,7 @@ class MainWindow(QMainWindow):
         """Enable/disable connection settings widgets."""
         self.port_combo.setEnabled(enabled)
         self.refresh_ports_action.setEnabled(enabled)
-        self.slave_spin.setEnabled(enabled)
+        self.device_btn.setEnabled(enabled)
         self.baud_combo.setEnabled(enabled)
         self.parity_combo.setEnabled(enabled)
         self.stopbits_combo.setEnabled(enabled)
@@ -674,6 +818,11 @@ class MainWindow(QMainWindow):
     
     def _open_scan_dialog(self) -> None:
         """Open the Modbus device scan dialog."""
+        # Clear previous scan results
+        self._found_devices = []
+        self._connected_slave_ids = []
+        self._update_device_menu()
+        
         # If already connected, disconnect first to free the serial port for scanning
         if self.modbus.is_connected:
             self.connect_action.setChecked(False)
@@ -689,7 +838,15 @@ class MainWindow(QMainWindow):
         dialog.stopbits_combo.setCurrentText(self.stopbits_combo.currentText())
         
         dialog.connect_requested.connect(self._on_scan_connect_requested)
+        dialog.devices_found.connect(self._on_devices_found)
         dialog.exec()
+
+    def _on_devices_found(self, found_ids: list) -> None:
+        """Handle devices found from scan."""
+        self._found_devices = found_ids.copy()
+        self._connected_slave_ids = found_ids.copy()  # Select all by default
+        self.project.connection.found_devices = found_ids.copy()
+        self._update_device_menu()
 
     def _on_scan_connect_requested(self, settings: dict) -> None:
         """Handle connection request from scan dialog."""
@@ -697,11 +854,16 @@ class MainWindow(QMainWindow):
         index = self.port_combo.findData(settings["port"])
         if index >= 0:
             self.port_combo.setCurrentIndex(index)
-            
-        self.slave_spin.setValue(settings["slave_id"])
+        
+        # Store found devices and selected slave IDs
+        self._found_devices = settings.get("found_devices", settings.get("slave_ids", []))
+        self._connected_slave_ids = settings.get("slave_ids", [])
+        
         self.baud_combo.setCurrentText(str(settings["baud_rate"]))
         self.parity_combo.setCurrentText(settings["parity"])
         self.stopbits_combo.setCurrentText(str(settings["stop_bits"]))
+        
+        self._update_device_menu()
         
         # Trigger actual connection
         self.connect_action.setChecked(True)
@@ -730,6 +892,7 @@ class MainWindow(QMainWindow):
             "<p>A modern GUI for Modbus RTU communication.</p>"
             "<p>Features:</p>"
             "<ul>"
+            "<li>Multi-device support (connect to multiple slaves)</li>"
             "<li>Real-time register monitoring</li>"
             "<li>Computed variables with expressions</li>"
             "<li>Live plotting</li>"
@@ -760,6 +923,7 @@ class MainWindow(QMainWindow):
         """Handle lost connection."""
         self.connect_action.setChecked(False)
         self.connect_action.setText("Connect")
+        # Keep device selection so user can easily reconnect
         self.speed_test_panel.set_connected(False)
         self._disconnect()
         QMessageBox.warning(self, "Connection Lost", "Connection to Modbus device was lost.")
@@ -768,9 +932,9 @@ class MainWindow(QMainWindow):
         """Handle write request from table."""
         success = self.data_engine.write_register(register, value)
         if success:
-            self.statusbar.showMessage(f"Wrote {value} to register {register.address}", 3000)
+            self.statusbar.showMessage(f"Wrote {value} to {register.designator}", 3000)
             # Clear bits panel pending values for this register
-            self.bits_panel.clear_pending(register.address)
+            self.bits_panel.clear_pending(register.slave_id, register.address)
     
     def _on_variables_changed(self) -> None:
         """Handle variables change from panel."""
@@ -781,9 +945,9 @@ class MainWindow(QMainWindow):
         """Handle bits change from panel."""
         self.project.bits = self.bits_panel.get_bits()
     
-    def _on_bit_value_changed(self, address: int, new_value: int) -> None:
+    def _on_bit_value_changed(self, slave_id: int, address: int, new_value: int) -> None:
         """Handle bit value change - update the register's new value field."""
-        self.table_view.set_register_new_value(address, new_value)
+        self.table_view.set_register_new_value(slave_id, address, new_value)
     
     def _update_status(self) -> None:
         """Update status bar."""
@@ -799,7 +963,8 @@ class MainWindow(QMainWindow):
     def _update_register_count(self) -> None:
         """Update register count in status bar."""
         count = len(self.project.registers)
-        self.register_label.setText(f"Registers: {count}")
+        devices = len(set(r.slave_id for r in self.project.registers))
+        self.register_label.setText(f"Registers: {count} ({devices} devices)")
     
     def _update_ui_from_project(self) -> None:
         """Update UI from project data."""
@@ -809,7 +974,11 @@ class MainWindow(QMainWindow):
         if index >= 0:
             self.port_combo.setCurrentIndex(index)
         
-        self.slave_spin.setValue(settings.slave_id)
+        # Update found devices from project
+        self._found_devices = settings.found_devices.copy()
+        self._connected_slave_ids = self._found_devices.copy()  # Select all by default
+        self._update_device_menu()
+        
         self.baud_combo.setCurrentText(str(settings.baud_rate))
         
         parity_map = {"N": "None", "E": "Even", "O": "Odd"}
@@ -828,8 +997,6 @@ class MainWindow(QMainWindow):
         self.plot_view.set_selected_registers(self.project.views.plot_registers)
         self.plot_view.set_selected_variables(self.project.views.plot_variables)
         self.plot_view.set_plot_options(self.project.views.plot_options)
-        self.variables_panel.set_variables(self.project.variables)
-        self.bits_panel.set_bits(self.project.bits)
         self._update_register_count()
         
         # Restore layout state from project if available

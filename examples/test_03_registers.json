@@ -1,0 +1,233 @@
+[
+  {
+    "address": 0,
+    "slave_id": 1,
+    "size": 1,
+    "label": "STATUS",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "binary",
+    "fast_poll": false
+  },
+  {
+    "address": 1,
+    "slave_id": 1,
+    "size": 4,
+    "label": "CHIP ID",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "hex",
+    "fast_poll": false
+  },
+  {
+    "address": 5,
+    "slave_id": 1,
+    "size": 1,
+    "label": "FW VERSION",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 6,
+    "slave_id": 1,
+    "size": 1,
+    "label": "CONFIG",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "binary",
+    "fast_poll": false
+  },
+  {
+    "address": 7,
+    "slave_id": 1,
+    "size": 1,
+    "label": "CALIBRATE",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 8,
+    "slave_id": 1,
+    "size": 1,
+    "label": "BAUD RATE",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 9,
+    "slave_id": 1,
+    "size": 1,
+    "label": "SLAVE ID",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 10,
+    "slave_id": 1,
+    "size": 1,
+    "label": "CONFIRM",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 11,
+    "slave_id": 1,
+    "size": 1,
+    "label": "DUMMY",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 12,
+    "slave_id": 1,
+    "size": 1,
+    "label": "SCALE CH1",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 13,
+    "slave_id": 1,
+    "size": 1,
+    "label": "SCALE CH2",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 14,
+    "slave_id": 1,
+    "size": 1,
+    "label": "SCALE CH3",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 15,
+    "slave_id": 1,
+    "size": 1,
+    "label": "SCALE CH4",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 16,
+    "slave_id": 1,
+    "size": 2,
+    "label": "TIMESTAMP",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": true
+  },
+  {
+    "address": 18,
+    "slave_id": 1,
+    "size": 2,
+    "label": "CH1 RAW",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": true
+  },
+  {
+    "address": 20,
+    "slave_id": 1,
+    "size": 2,
+    "label": "CH2 RAW",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": true
+  },
+  {
+    "address": 22,
+    "slave_id": 1,
+    "size": 2,
+    "label": "CH3 RAW",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": true
+  },
+  {
+    "address": 24,
+    "slave_id": 1,
+    "size": 2,
+    "label": "CH4 RAW",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read",
+    "display_format": "decimal",
+    "fast_poll": true
+  },
+  {
+    "address": 50,
+    "slave_id": 1,
+    "size": 2,
+    "label": "KALMAN Q",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 52,
+    "slave_id": 1,
+    "size": 2,
+    "label": "KALMAN R",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  },
+  {
+    "address": 54,
+    "slave_id": 1,
+    "size": 2,
+    "label": "KALMAN SCALE",
+    "byte_order": "big",
+    "scale": 1.0,
+    "access_mode": "read_write",
+    "display_format": "decimal",
+    "fast_poll": false
+  }
+]

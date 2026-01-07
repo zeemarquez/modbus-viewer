@@ -1,5 +1,6 @@
 """
 Scan dialog for finding Modbus devices on a serial port.
+Supports multi-device selection.
 """
 
 import time
@@ -7,7 +8,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
     QSpinBox, QPushButton, QProgressBar, QTableWidget, QTableWidgetItem,
-    QFormLayout, QGroupBox, QMessageBox, QHeaderView, QWidget
+    QFormLayout, QGroupBox, QMessageBox, QHeaderView, QWidget, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QSettings
 
@@ -75,18 +76,20 @@ class ScanWorker(QThread):
 
 
 class ScanDialog(QDialog):
-    """Dialog for scanning Modbus devices."""
+    """Dialog for scanning Modbus devices with multi-device selection support."""
     
-    # Signal emitted when user wants to connect to a found device
-    connect_requested = Signal(dict)
+    # Signal emitted when user wants to connect to found devices
+    connect_requested = Signal(dict)  # Now includes list of slave_ids
+    devices_found = Signal(list)  # Emitted with list of found device IDs
     
     def __init__(self, parent=None, initial_port: str = "", initial_baud: int = 9600):
         super().__init__(parent)
         self.setWindowTitle("Scan Modbus Devices")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         
         self.worker: Optional[ScanWorker] = None
         self.found_ids: List[int] = []
+        self._device_checkboxes: dict = {}  # slave_id -> QCheckBox
         
         self._setup_ui(initial_port, initial_baud)
         
@@ -174,12 +177,23 @@ class ScanDialog(QDialog):
         results_group = QGroupBox("Found Devices")
         results_layout = QVBoxLayout(results_group)
         
+        # Selection buttons
+        sel_btn_layout = QHBoxLayout()
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.clicked.connect(self._select_all_devices)
+        self.select_none_btn = QPushButton("Select None")
+        self.select_none_btn.clicked.connect(self._select_no_devices)
+        sel_btn_layout.addWidget(self.select_all_btn)
+        sel_btn_layout.addWidget(self.select_none_btn)
+        sel_btn_layout.addStretch()
+        results_layout.addLayout(sel_btn_layout)
+        
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(3)
-        self.results_table.setHorizontalHeaderLabels(["Slave ID", "Status", "Action"])
+        self.results_table.setHorizontalHeaderLabels(["Select", "Slave ID", "Status"])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.results_table.setColumnWidth(2, 100)
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.results_table.setColumnWidth(0, 60)
         self.results_table.verticalHeader().setDefaultSectionSize(36)
         self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -194,11 +208,16 @@ class ScanDialog(QDialog):
         self.scan_btn.setObjectName("primary")
         self.scan_btn.clicked.connect(self._toggle_scan)
         
+        self.connect_btn = QPushButton("Connect Selected")
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.clicked.connect(self._connect_selected)
+        
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.close)
         
         btn_layout.addStretch()
         btn_layout.addWidget(self.scan_btn)
+        btn_layout.addWidget(self.connect_btn)
         btn_layout.addWidget(self.close_btn)
         
         layout.addLayout(btn_layout)
@@ -287,9 +306,11 @@ class ScanDialog(QDialog):
         
         self.results_table.setRowCount(0)
         self.found_ids = []
+        self._device_checkboxes.clear()
         self.progress_bar.setValue(1)
         self.status_label.setText(f"Scanning port {port} at {baud} baud...")
         self.scan_btn.setText("Stop Scan")
+        self.connect_btn.setEnabled(False)
         self.port_combo.setEnabled(False)
         self.advanced_toggle.setEnabled(False)
         self.baud_combo.setEnabled(False)
@@ -330,6 +351,18 @@ class ScanDialog(QDialog):
         row = self.results_table.rowCount()
         self.results_table.insertRow(row)
         
+        # Checkbox for selection
+        check_widget = QWidget()
+        check_layout = QHBoxLayout(check_widget)
+        check_layout.setContentsMargins(0, 0, 0, 0)
+        check_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        checkbox = QCheckBox()
+        checkbox.setChecked(True)  # Default to selected
+        checkbox.stateChanged.connect(self._update_connect_button)
+        check_layout.addWidget(checkbox)
+        self.results_table.setCellWidget(row, 0, check_widget)
+        self._device_checkboxes[slave_id] = checkbox
+        
         # ID item
         id_item = QTableWidgetItem(str(slave_id))
         id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -340,23 +373,53 @@ class ScanDialog(QDialog):
         status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         status_item.setForeground(Qt.GlobalColor.darkGreen)
         
-        self.results_table.setItem(row, 0, id_item)
-        self.results_table.setItem(row, 1, status_item)
+        self.results_table.setItem(row, 1, id_item)
+        self.results_table.setItem(row, 2, status_item)
         
-        # Connect button
-        connect_btn = QPushButton("Connect")
-        connect_btn.clicked.connect(lambda: self._request_connect(slave_id))
-        self.results_table.setCellWidget(row, 2, connect_btn)
+        self._update_connect_button()
 
-    def _request_connect(self, slave_id: int):
-        """Emit signal and close dialog."""
+    def _update_connect_button(self):
+        """Update connect button based on selection."""
+        selected = self._get_selected_slave_ids()
+        self.connect_btn.setEnabled(len(selected) > 0)
+        if selected:
+            self.connect_btn.setText(f"Connect Selected ({len(selected)})")
+        else:
+            self.connect_btn.setText("Connect Selected")
+
+    def _get_selected_slave_ids(self) -> List[int]:
+        """Get list of selected slave IDs."""
+        selected = []
+        for slave_id, checkbox in self._device_checkboxes.items():
+            if checkbox.isChecked():
+                selected.append(slave_id)
+        return sorted(selected)
+
+    def _select_all_devices(self):
+        """Select all found devices."""
+        for checkbox in self._device_checkboxes.values():
+            checkbox.setChecked(True)
+
+    def _select_no_devices(self):
+        """Deselect all devices."""
+        for checkbox in self._device_checkboxes.values():
+            checkbox.setChecked(False)
+
+    def _connect_selected(self):
+        """Connect to selected devices."""
+        selected = self._get_selected_slave_ids()
+        if not selected:
+            QMessageBox.warning(self, "No Selection", "Please select at least one device to connect.")
+            return
+        
         settings = {
             "port": self.port_combo.currentData(),
-            "slave_id": slave_id,
+            "slave_ids": selected,
             "baud_rate": int(self.baud_combo.currentText()),
             "parity": self.parity_combo.currentText(),
             "stop_bits": int(self.stopbits_combo.currentText()),
-            "timeout": 1.0, # Default full timeout for actual connection
+            "timeout": 1.0,  # Default full timeout for actual connection
+            "found_devices": self.found_ids,
         }
         self.connect_requested.emit(settings)
         self.accept()
@@ -376,6 +439,7 @@ class ScanDialog(QDialog):
             self.status_label.setText("Scan complete. No devices found.")
         else:
             self.status_label.setText(f"Scan complete. Found {len(found_ids)} device(s).")
+            self.devices_found.emit(found_ids)
             
     def _on_error(self, message: str):
         QMessageBox.critical(self, "Scan Error", f"An error occurred during scan:\n{message}")
@@ -386,4 +450,7 @@ class ScanDialog(QDialog):
             self.worker.cancel()
             self.worker.wait()
         event.accept()
-
+    
+    def get_found_devices(self) -> List[int]:
+        """Get list of all found device IDs."""
+        return self.found_ids.copy()

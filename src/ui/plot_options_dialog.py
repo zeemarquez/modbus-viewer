@@ -1,5 +1,6 @@
 """
 Plot options dialog for customizing plot appearance.
+Supports multi-device with designator format.
 """
 
 from typing import List, Dict, Optional
@@ -7,7 +8,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QLabel, QGroupBox, QDialogButtonBox, QCheckBox,
-    QScrollArea, QWidget, QFrame
+    QScrollArea, QWidget, QFrame, QTabWidget
 )
 from PySide6.QtCore import Qt
 
@@ -16,13 +17,13 @@ from src.models.variable import Variable
 
 
 class PlotOptionsDialog(QDialog):
-    """Dialog for customizing plot options."""
+    """Dialog for customizing plot options with multi-device support."""
     
     def __init__(self, line_width: float = 2.0, grid_alpha: float = 0.1, 
                  show_legend: bool = True, time_window_index: int = 2,
                  y_auto_scale: bool = True, y_min: float = 0.0, y_max: float = 100.0,
                  registers: List[Register] = None, variables: List[Variable] = None,
-                 selected_registers: List[int] = None, selected_variables: List[str] = None,
+                 selected_registers: List[str] = None, selected_variables: List[str] = None,
                  parent=None):
         super().__init__(parent)
         
@@ -35,10 +36,10 @@ class PlotOptionsDialog(QDialog):
         self.y_max = y_max
         self.registers = registers or []
         self.variables = variables or []
-        self.selected_registers = selected_registers or []
+        self.selected_registers = selected_registers or []  # Now list of designators
         self.selected_variables = selected_variables or []
         
-        self._register_checkboxes: Dict[int, QCheckBox] = {}
+        self._register_checkboxes: Dict[str, QCheckBox] = {}  # designator -> checkbox
         self._variable_checkboxes: Dict[str, QCheckBox] = {}
         
         self.setWindowTitle("Plot Options")
@@ -154,21 +155,9 @@ class PlotOptionsDialog(QDialog):
         reg_title.setStyleSheet("font-size: 11px; font-weight: 500;")
         reg_section.addWidget(reg_title)
         
-        reg_scroll = QScrollArea()
-        reg_scroll.setWidgetResizable(True)
-        reg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        reg_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        reg_scroll.setStyleSheet("border: 1px solid #e0e0e0; border-radius: 4px; background: #ffffff;")
-        reg_scroll.setMinimumHeight(200)
-        
-        self.register_container = QWidget()
-        self.register_container.setStyleSheet("background: transparent;")
-        self.register_layout = QVBoxLayout(self.register_container)
-        self.register_layout.setContentsMargins(8, 8, 8, 8)
-        self.register_layout.setSpacing(4)
-        
-        reg_scroll.setWidget(self.register_container)
-        reg_section.addWidget(reg_scroll, stretch=1)
+        self.reg_tabs = QTabWidget()
+        self.reg_tabs.setMinimumHeight(200)
+        reg_section.addWidget(self.reg_tabs, stretch=1)
         
         # Register buttons
         reg_btn_layout = QHBoxLayout()
@@ -251,30 +240,60 @@ class PlotOptionsDialog(QDialog):
     
     def _populate_checkboxes(self) -> None:
         """Populate register and variable checkboxes."""
-        # Clear existing
-        for checkbox in self._register_checkboxes.values():
-            checkbox.deleteLater()
+        # Clear existing register tabs
+        self.reg_tabs.clear()
         self._register_checkboxes.clear()
         
+        # Clear existing variable checkboxes
         for checkbox in self._variable_checkboxes.values():
             checkbox.deleteLater()
         self._variable_checkboxes.clear()
         
-        # Create register checkboxes
+        # Group registers by device
+        by_device: Dict[int, List[Register]] = {}
         for reg in self.registers:
-            checkbox = QCheckBox(reg.label or f"R{reg.address}")
-            checkbox.setStyleSheet("font-size: 11px;")
-            checkbox.setChecked(reg.address in self.selected_registers)
-            self.register_layout.addWidget(checkbox)
-            self._register_checkboxes[reg.address] = checkbox
+            if reg.slave_id not in by_device:
+                by_device[reg.slave_id] = []
+            by_device[reg.slave_id].append(reg)
+        
+        # Create register checkboxes in tabs grouped by device
+        for slave_id in sorted(by_device.keys()):
+            # Create tab content
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(8, 8, 8, 8)
+            tab_layout.setSpacing(4)
+            tab_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            
+            # Add to scroll area for this tab
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setWidget(tab_widget)
+            
+            for reg in by_device[slave_id]:
+                label = reg.label if reg.label else f"R{reg.address}"
+                checkbox = QCheckBox(label)
+                checkbox.setStyleSheet("font-size: 11px;")
+                checkbox.setToolTip(reg.designator)
+                checkbox.setChecked(reg.designator in self.selected_registers)
+                tab_layout.addWidget(checkbox)
+                self._register_checkboxes[reg.designator] = checkbox
+            
+            self.reg_tabs.addTab(scroll, f"Device {slave_id}")
         
         # Create variable checkboxes
         for var in self.variables:
-            checkbox = QCheckBox(var.label or var.name)
+            label = var.label or var.name
+            if not var.is_global and var.slave_id:
+                label = f"D{var.slave_id}.{label}"
+            
+            checkbox = QCheckBox(label)
             checkbox.setStyleSheet("font-size: 11px;")
-            checkbox.setChecked(var.name in self.selected_variables)
+            checkbox.setToolTip(var.designator)
+            checkbox.setChecked(var.designator in self.selected_variables)
             self.variable_layout.addWidget(checkbox)
-            self._variable_checkboxes[var.name] = checkbox
+            self._variable_checkboxes[var.designator] = checkbox
     
     def _select_all_registers(self) -> None:
         """Select all register checkboxes."""
@@ -304,11 +323,11 @@ class PlotOptionsDialog(QDialog):
     def get_options(self) -> dict:
         """Get the selected options."""
         selected_registers = [
-            address for address, checkbox in self._register_checkboxes.items()
+            designator for designator, checkbox in self._register_checkboxes.items()
             if checkbox.isChecked()
         ]
         selected_variables = [
-            name for name, checkbox in self._variable_checkboxes.items()
+            designator for designator, checkbox in self._variable_checkboxes.items()
             if checkbox.isChecked()
         ]
         
@@ -320,7 +339,6 @@ class PlotOptionsDialog(QDialog):
             'y_auto_scale': self.y_auto_scale_check.isChecked(),
             'y_min': self.y_min_spin.value(),
             'y_max': self.y_max_spin.value(),
-            'selected_registers': selected_registers,
+            'selected_registers': selected_registers,  # Now list of designators
             'selected_variables': selected_variables,
         }
-

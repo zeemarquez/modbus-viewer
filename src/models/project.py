@@ -18,31 +18,43 @@ class ConnectionSettings:
     """Serial connection configuration."""
     
     port: str = ""
-    slave_id: int = 1
+    slave_ids: List[int] = field(default_factory=lambda: [1])  # List of slave IDs to connect to
     baud_rate: int = 9600
     parity: str = "N"  # N, E, O
     stop_bits: int = 1
     timeout: float = 1.0
     
+    # Devices found during last scan (for dropdown population)
+    found_devices: List[int] = field(default_factory=list)
+    
     def to_dict(self) -> dict:
         return {
             "port": self.port,
-            "slave_id": self.slave_id,
+            "slave_ids": self.slave_ids,
             "baud_rate": self.baud_rate,
             "parity": self.parity,
             "stop_bits": self.stop_bits,
             "timeout": self.timeout,
+            "found_devices": self.found_devices,
         }
     
     @classmethod
     def from_dict(cls, data: dict) -> "ConnectionSettings":
+        # Handle legacy single slave_id field
+        slave_ids = data.get("slave_ids", [])
+        if not slave_ids and "slave_id" in data:
+            slave_ids = [data["slave_id"]]
+        if not slave_ids:
+            slave_ids = [1]
+            
         return cls(
             port=data.get("port", ""),
-            slave_id=data.get("slave_id", 1),
+            slave_ids=slave_ids,
             baud_rate=data.get("baud_rate", 9600),
             parity=data.get("parity", "N"),
             stop_bits=data.get("stop_bits", 1),
             timeout=data.get("timeout", 1.0),
+            found_devices=data.get("found_devices", []),
         )
 
 
@@ -86,7 +98,7 @@ class PlotOptions:
 class ViewSettings:
     """View configuration for plots and display options."""
     
-    plot_registers: List[int] = field(default_factory=list)
+    plot_registers: List[str] = field(default_factory=list)  # Designators like "D1.R0"
     plot_variables: List[str] = field(default_factory=list)  # Variable names
     plot_time_window: int = 60  # seconds (deprecated, use plot_options.time_window_index)
     poll_interval: int = 100  # milliseconds
@@ -103,8 +115,14 @@ class ViewSettings:
     
     @classmethod
     def from_dict(cls, data: dict) -> "ViewSettings":
+        # Handle legacy plot_registers format (list of ints)
+        plot_registers = data.get("plot_registers", [])
+        if plot_registers and isinstance(plot_registers[0], int):
+            # Convert old format (address only) to new format (D1.R<addr>)
+            plot_registers = [f"D1.R{addr}" for addr in plot_registers]
+        
         return cls(
-            plot_registers=data.get("plot_registers", []),
+            plot_registers=plot_registers,
             plot_variables=data.get("plot_variables", []),
             plot_time_window=data.get("plot_time_window", 60),
             poll_interval=data.get("poll_interval", 100),
@@ -116,7 +134,7 @@ class ViewSettings:
 class Project:
     """Complete project configuration."""
     
-    version: str = "1.0"
+    version: str = "2.0"  # Updated version for multi-device support
     connection: ConnectionSettings = field(default_factory=ConnectionSettings)
     registers: List[Register] = field(default_factory=list)
     variables: List[Variable] = field(default_factory=list)
@@ -181,8 +199,21 @@ class Project:
         project.file_path = file_path
         return project
     
-    def get_register_by_address(self, address: int) -> Optional[Register]:
-        """Find register by address."""
+    def get_register_by_designator(self, designator: str) -> Optional[Register]:
+        """Find register definition by designator (e.g., D1.R13)."""
+        # For common definitions, we just need to match the address part
+        if ".R" in designator:
+            try:
+                addr = int(designator.split(".R")[1])
+                for reg in self.registers:
+                    if reg.address == addr:
+                        return reg
+            except (ValueError, IndexError):
+                pass
+        return None
+    
+    def get_register(self, address: int) -> Optional[Register]:
+        """Find register definition by address."""
         for reg in self.registers:
             if reg.address == address:
                 return reg

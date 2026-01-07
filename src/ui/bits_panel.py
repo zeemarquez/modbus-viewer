@@ -1,13 +1,14 @@
 """
 Bits panel for displaying and controlling individual register bits.
+Supports multi-device with tabs.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QMessageBox, QLabel
+    QAbstractItemView, QMessageBox, QLabel, QTabWidget, QWidget
 )
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QColor, QBrush
@@ -19,20 +20,23 @@ from src.ui.styles import COLORS
 
 
 class BitsPanel(QFrame):
-    """Panel for displaying and controlling individual register bits."""
+    """Panel for displaying and controlling individual register bits with device tabs."""
     
     bits_changed = Signal()  # Emitted when bits are added/edited/removed
-    bit_value_changed = Signal(int, int)  # register_address, new_register_value
+    bit_value_changed = Signal(int, int, int)  # slave_id, register_address, new_register_value
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
         self.setLineWidth(1)
         
-        self.bits: List[Bit] = []
-        self.registers: List[Register] = []
-        self._register_map: Dict[int, Register] = {}
-        self._pending_bit_values: Dict[str, bool] = {}  # bit_name -> new_value
+        self.bit_definitions: List[Bit] = []
+        self.register_definitions: List[Register] = []
+        self.slave_ids: List[int] = [1]
+        self._live_bits: List[Bit] = []
+        self._register_map: Dict[Tuple[int, int], Register] = {}  # (slave_id, addr) -> register
+        self._pending_bit_values: Dict[Tuple[int, str], bool] = {}  # (slave_id, bit_name) -> new_value
+        self._device_tables: Dict[int, QTableWidget] = {}  # slave_id -> table
         
         self._setup_ui()
         self._load_settings()
@@ -62,24 +66,29 @@ class BitsPanel(QFrame):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
+        # Tab widget for devices
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget, stretch=1)
+
+    def _create_table(self) -> QTableWidget:
+        """Create a new table widget for a device."""
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels([
             "Label", "Register", "Bit", "Value", "New Value"
         ])
         
         # Table settings
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(36)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(36)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         # Column sizing
-        header = self.table.horizontalHeader()
+        header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionsMovable(True)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Label stretches
@@ -90,76 +99,116 @@ class BitsPanel(QFrame):
         header.resizeSection(4, 80)   # New Value
         
         # Connect double-click for toggling
-        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         
-        layout.addWidget(self.table, stretch=1)
+        return table
 
     def _load_settings(self) -> None:
         """Load table settings."""
         settings = QSettings()
         header_state = settings.value("bits_panel/header_state")
-        if header_state:
-            self.table.horizontalHeader().restoreState(header_state)
+        # Applied when tables are created
 
     def save_settings(self) -> None:
         """Save table settings."""
         settings = QSettings()
-        settings.setValue("bits_panel/header_state", self.table.horizontalHeader().saveState())
+        if self._device_tables:
+            first_table = next(iter(self._device_tables.values()))
+            settings.setValue("bits_panel/header_state", first_table.horizontalHeader().saveState())
     
     def set_registers(self, registers: List[Register]) -> None:
-        """Set the list of available registers."""
-        self.registers = registers
-        self._register_map = {reg.address: reg for reg in registers}
-        self.table.blockSignals(True)
-        try:
-            self._update_table()
-        finally:
-            self.table.blockSignals(False)
+        """Set the common register definitions."""
+        self.register_definitions = registers
+        # We also need live registers for the register map to show labels correctly
+        # This will be updated when rebuild_tabs is called with live instances
+        self._rebuild_tabs()
     
     def set_bits(self, bits: List[Bit]) -> None:
-        """Set the list of bits."""
-        self.bits = bits
+        """Set the common bit definitions."""
+        self.bit_definitions = bits
         self._pending_bit_values.clear()
-        self.table.blockSignals(True)
-        try:
-            self._update_table()
-        finally:
-            self.table.blockSignals(False)
+        self._rebuild_tabs()
+    
+    def set_slave_ids(self, slave_ids: List[int], live_registers: List[Register]) -> None:
+        """Set connected slave IDs and live registers for value lookup."""
+        self.slave_ids = slave_ids
+        self._register_map = {(reg.slave_id, reg.address): reg for reg in live_registers}
+        self._rebuild_tabs()
     
     def get_bits(self) -> List[Bit]:
-        """Get the current list of bits."""
-        return self.bits
+        """Get the common bit definitions."""
+        return self.bit_definitions
     
-    def _update_table(self) -> None:
-        """Update the table with current bits."""
-        self.table.setRowCount(len(self.bits))
+    def _rebuild_tabs(self) -> None:
+        """Rebuild tabs for each device using common definitions."""
+        # Clear existing tabs
+        self.tab_widget.clear()
+        self._device_tables.clear()
+        self._live_bits = []
         
-        for row, bit in enumerate(self.bits):
+        # Create tab for each device
+        for slave_id in sorted(self.slave_ids):
+            # Create live bits for this device
+            device_bits = []
+            for bit_def in self.bit_definitions:
+                live_bit = bit_def.copy()
+                live_bit.slave_id = slave_id
+                device_bits.append(live_bit)
+                self._live_bits.append(live_bit)
+            
+            table = self._create_table()
+            self._device_tables[slave_id] = table
+            
+            table.blockSignals(True)
+            try:
+                self._populate_table(table, device_bits, slave_id)
+            finally:
+                table.blockSignals(False)
+            
+            self.tab_widget.addTab(table, f"Device {slave_id}")
+        
+        # If no devices, add empty tab
+        if not self.slave_ids:
+            table = self._create_table()
+            self._device_tables[0] = table
+            self.tab_widget.addTab(table, "No Devices")
+    
+    def get_live_bits(self) -> List[Bit]:
+        """Get all live bit instances across all devices."""
+        return self._live_bits
+    
+    def _populate_table(self, table: QTableWidget, bits: List[Bit], slave_id: int) -> None:
+        """Populate a table with bits."""
+        table.setRowCount(len(bits))
+        
+        for row, bit in enumerate(bits):
             # Label
             label_item = QTableWidgetItem(bit.label)
+            label_item.setData(Qt.ItemDataRole.UserRole, bit)
             label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 0, label_item)
+            table.setItem(row, 0, label_item)
             
             # Register
-            reg = self._register_map.get(bit.register_address)
+            reg = self._register_map.get((bit.slave_id, bit.register_address))
             reg_text = f"R{bit.register_address}"
             if reg and reg.label:
                 reg_text = reg.label
             reg_item = QTableWidgetItem(reg_text)
             reg_item.setFlags(reg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 1, reg_item)
+            reg_item.setToolTip(bit.designator)
+            table.setItem(row, 1, reg_item)
             
             # Bit index
             bit_idx_item = QTableWidgetItem(str(bit.bit_index))
             bit_idx_item.setFlags(bit_idx_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             bit_idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, bit_idx_item)
+            table.setItem(row, 2, bit_idx_item)
             
             # Value (current) - Use QLabel for robust styling
             value_label = QLabel("---")
             value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             value_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            self.table.setCellWidget(row, 3, value_label)
+            table.setCellWidget(row, 3, value_label)
             
             # New Value - Use QLabel for robust styling
             new_value_label = QLabel("")
@@ -174,21 +223,33 @@ class BitsPanel(QFrame):
             else:
                 new_value_label.setStyleSheet("background-color: transparent; border: none;")
             
-            self.table.setCellWidget(row, 4, new_value_label)
+            table.setCellWidget(row, 4, new_value_label)
         
         self._update_display()
     
+    def _get_bit_from_table(self, table: QTableWidget, row: int) -> Optional[Bit]:
+        """Get bit object from table row."""
+        item = table.item(row, 0)
+        if item:
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
+    
     def _on_cell_double_clicked(self, row: int, column: int) -> None:
         """Handle double-click - toggle bit on New Value column."""
-        if row >= len(self.bits):
-            return
-        
-        # Only respond to clicks on New Value column (4 now)
+        # Only respond to clicks on New Value column (4)
         if column != 4:
             return
         
-        bit = self.bits[row]
-        reg = self._register_map.get(bit.register_address)
+        # Find which table triggered this
+        table = self.sender()
+        if not isinstance(table, QTableWidget):
+            return
+        
+        bit = self._get_bit_from_table(table, row)
+        if not bit:
+            return
+        
+        reg = self._register_map.get((bit.slave_id, bit.register_address))
         
         # Check if register is writable
         if not reg or reg.access_mode not in (AccessMode.READ_WRITE, AccessMode.WRITE):
@@ -199,8 +260,9 @@ class BitsPanel(QFrame):
             return
         
         # Get current value (either pending or from register)
-        if bit.name in self._pending_bit_values:
-            current_new_value = self._pending_bit_values[bit.name]
+        key = (bit.slave_id, bit.name)
+        if key in self._pending_bit_values:
+            current_new_value = self._pending_bit_values[key]
         else:
             current_new_value = bit.value if bit.value is not None else False
         
@@ -210,149 +272,183 @@ class BitsPanel(QFrame):
         # If the new value matches the actual current value, remove from pending
         actual_value = bit.value if bit.value is not None else False
         if new_value == actual_value:
-            self._pending_bit_values.pop(bit.name, None)
+            self._pending_bit_values.pop(key, None)
         else:
-            self._pending_bit_values[bit.name] = new_value
+            self._pending_bit_values[key] = new_value
         
-        # Calculate new register value based on ALL bits for this register
+        # Calculate new register value based on ALL bits for this register on this device
         # Start with the last known value from the device
         current_reg_value = reg.raw_value if reg.raw_value is not None else 0
         new_reg_value = int(current_reg_value)
         
         # Apply all bits for this register that have pending values
-        for b in self.bits:
-            if b.register_address == reg.address:
-                if b.name in self._pending_bit_values:
-                    new_reg_value = b.apply_to_value(new_reg_value, self._pending_bit_values[b.name])
+        for b in self._live_bits:
+            if b.slave_id == reg.slave_id and b.register_address == reg.address:
+                b_key = (b.slave_id, b.name)
+                if b_key in self._pending_bit_values:
+                    new_reg_value = b.apply_to_value(new_reg_value, self._pending_bit_values[b_key])
         
-        self.bit_value_changed.emit(reg.address, new_reg_value)
+        self.bit_value_changed.emit(reg.slave_id, reg.address, new_reg_value)
         
         # Update display
         self._update_display()
     
     def _update_display(self) -> None:
         """Update the display of values."""
-        for row, bit in enumerate(self.bits):
-            if row >= self.table.rowCount():
-                break
-            
-            reg = self._register_map.get(bit.register_address)
-            
-            # Value (current)
-            value_label = self.table.cellWidget(row, 3)
-            if isinstance(value_label, QLabel):
-                if bit.value is not None:
-                    if bit.value:
-                        value_label.setText("TRUE")
-                        value_label.setStyleSheet(
-                            "background-color: #1976d2; color: #ffffff; font-weight: bold; border: none;"
-                        )
-                    else:
-                        value_label.setText("FALSE")
-                        value_label.setStyleSheet(
-                            "background-color: #000000; color: #ffffff; font-weight: bold; border: none;"
-                        )
-                else:
-                    value_label.setText("---")
-                    value_label.setStyleSheet("background-color: transparent; color: #757575; border: none;")
-            
-            # New Value
-            new_value_label = self.table.cellWidget(row, 4)
-            if isinstance(new_value_label, QLabel):
-                is_writable = reg and reg.access_mode in (AccessMode.READ_WRITE, AccessMode.WRITE)
+        for slave_id, table in self._device_tables.items():
+            for row in range(table.rowCount()):
+                bit = self._get_bit_from_table(table, row)
+                if not bit:
+                    continue
                 
-                if is_writable:
-                    if bit.name in self._pending_bit_values:
-                        pending_value = self._pending_bit_values[bit.name]
-                        if pending_value:
-                            new_value_label.setText("TRUE")
-                            new_value_label.setStyleSheet(
+                reg = self._register_map.get((bit.slave_id, bit.register_address))
+                
+                # Value (current)
+                value_label = table.cellWidget(row, 3)
+                if isinstance(value_label, QLabel):
+                    if bit.value is not None:
+                        if bit.value:
+                            value_label.setText("TRUE")
+                            value_label.setStyleSheet(
                                 "background-color: #1976d2; color: #ffffff; font-weight: bold; border: none;"
                             )
                         else:
-                            new_value_label.setText("FALSE")
-                            new_value_label.setStyleSheet(
+                            value_label.setText("FALSE")
+                            value_label.setStyleSheet(
                                 "background-color: #000000; color: #ffffff; font-weight: bold; border: none;"
                             )
                     else:
+                        value_label.setText("---")
+                        value_label.setStyleSheet("background-color: transparent; color: #757575; border: none;")
+                
+                # New Value
+                new_value_label = table.cellWidget(row, 4)
+                if isinstance(new_value_label, QLabel):
+                    is_writable = reg and reg.access_mode in (AccessMode.READ_WRITE, AccessMode.WRITE)
+                    
+                    if is_writable:
+                        key = (bit.slave_id, bit.name)
+                        if key in self._pending_bit_values:
+                            pending_value = self._pending_bit_values[key]
+                            if pending_value:
+                                new_value_label.setText("TRUE")
+                                new_value_label.setStyleSheet(
+                                    "background-color: #1976d2; color: #ffffff; font-weight: bold; border: none;"
+                                )
+                            else:
+                                new_value_label.setText("FALSE")
+                                new_value_label.setStyleSheet(
+                                    "background-color: #000000; color: #ffffff; font-weight: bold; border: none;"
+                                )
+                        else:
+                            new_value_label.setText("")
+                            new_value_label.setStyleSheet("background-color: transparent; border: none;")
+                    else:
                         new_value_label.setText("")
-                        new_value_label.setStyleSheet("background-color: transparent; border: none;")
-                else:
-                    new_value_label.setText("")
-                    new_value_label.setStyleSheet("background-color: #eeeeee; border: none;")
+                        new_value_label.setStyleSheet("background-color: #eeeeee; border: none;")
     
     def update_values(self) -> None:
         """Update bit values from registers."""
-        self.table.blockSignals(True)
-        try:
-            for bit in self.bits:
-                reg = self._register_map.get(bit.register_address)
-                if reg and reg.raw_value is not None:
-                    bit.value = bit.extract_from_value(int(reg.raw_value))
-                else:
-                    bit.value = None
-            
-            self._update_display()
-        finally:
-            self.table.blockSignals(False)
+        for bit in self._live_bits:
+            reg = self._register_map.get((bit.slave_id, bit.register_address))
+            if reg and reg.raw_value is not None:
+                bit.value = bit.extract_from_value(int(reg.raw_value))
+            else:
+                bit.value = None
+        
+        self._update_display()
     
-    def clear_pending(self, register_address: Optional[int] = None) -> None:
+    def clear_pending(self, slave_id: Optional[int] = None, register_address: Optional[int] = None) -> None:
         """Clear pending bit values."""
-        if register_address is None:
+        if slave_id is None and register_address is None:
             self._pending_bit_values.clear()
         else:
             # Only clear bits for this register
-            for bit in self.bits:
-                if bit.register_address == register_address:
-                    self._pending_bit_values.pop(bit.name, None)
+            for bit in self._live_bits:
+                if bit.slave_id == slave_id and bit.register_address == register_address:
+                    self._pending_bit_values.pop((bit.slave_id, bit.name), None)
         self._update_display()
     
     def _add_bit(self) -> None:
-        """Add a new bit."""
-        if not self.registers:
+        """Add a new bit definition."""
+        if not self.register_definitions:
             QMessageBox.information(
                 self, "No Registers",
                 "Please add registers before defining bits."
             )
             return
         
-        dialog = BitEditorDialog(registers=self.registers, parent=self)
+        dialog = BitEditorDialog(registers=self.register_definitions, parent=self)
         if dialog.exec():
             bit = dialog.get_bit()
-            self.bits.append(bit)
-            self._update_table()
+            self.bit_definitions.append(bit)
+            self._rebuild_tabs()
             self.bits_changed.emit()
     
     def _edit_bit(self) -> None:
-        """Edit selected bit."""
-        row = self.table.currentRow()
+        """Edit selected bit definition."""
+        current_table = self.tab_widget.currentWidget()
+        if not isinstance(current_table, QTableWidget):
+            return
+        
+        row = current_table.currentRow()
         if row < 0:
             QMessageBox.information(self, "No Selection", "Please select a bit to edit.")
             return
         
-        bit = self.bits[row]
-        dialog = BitEditorDialog(bit=bit, registers=self.registers, parent=self)
+        live_bit = self._get_bit_from_table(current_table, row)
+        if not live_bit:
+            return
+        
+        # Find original definition
+        bit_def = None
+        bit_idx = -1
+        for i, bd in enumerate(self.bit_definitions):
+            if bd.name == live_bit.name and bd.register_address == live_bit.register_address and bd.bit_index == live_bit.bit_index:
+                bit_def = bd
+                bit_idx = i
+                break
+        
+        if bit_idx < 0:
+            return
+        
+        dialog = BitEditorDialog(bit=bit_def, registers=self.register_definitions, parent=self)
         if dialog.exec():
-            self.bits[row] = dialog.get_bit()
-            self._update_table()
+            self.bit_definitions[bit_idx] = dialog.get_bit()
+            self._rebuild_tabs()
             self.bits_changed.emit()
     
     def _remove_bit(self) -> None:
-        """Remove selected bit."""
-        row = self.table.currentRow()
+        """Remove selected bit definition."""
+        current_table = self.tab_widget.currentWidget()
+        if not isinstance(current_table, QTableWidget):
+            return
+        
+        row = current_table.currentRow()
         if row < 0:
             QMessageBox.information(self, "No Selection", "Please select a bit to remove.")
             return
         
-        bit = self.bits[row]
+        live_bit = self._get_bit_from_table(current_table, row)
+        if not live_bit:
+            return
+            
         reply = QMessageBox.question(
             self, "Confirm Remove",
-            f"Remove bit '{bit.name}'?",
+            f"Remove bit definition '{live_bit.name}' for ALL devices?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            del self.bits[row]
-            self._pending_bit_values.pop(bit.name, None)
-            self._update_table()
+            # Remove from definitions
+            self.bit_definitions = [bd for bd in self.bit_definitions 
+                                   if not (bd.name == live_bit.name and 
+                                          bd.register_address == live_bit.register_address and 
+                                          bd.bit_index == live_bit.bit_index)]
+            
+            # Remove all pending values for this bit across all devices
+            for sid in self.slave_ids:
+                self._pending_bit_values.pop((sid, live_bit.name), None)
+                
+            self._rebuild_tabs()
             self.bits_changed.emit()

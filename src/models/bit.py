@@ -13,11 +13,17 @@ class Bit:
     name: str
     register_address: int  # Address of the source register
     bit_index: int  # 0-15 for 16-bit registers
+    slave_id: int = 1  # Slave ID of the device this bit's register belongs to
     label: str = ""
     
     # Runtime values (not serialized)
     value: Optional[bool] = field(default=None, repr=False)
     error: Optional[str] = field(default=None, repr=False)
+    
+    @property
+    def designator(self) -> str:
+        """Get the full designator for this bit's register (e.g., D1.R13)."""
+        return f"D{self.slave_id}.R{self.register_address}"
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -55,6 +61,6 @@ class Bit:
             name=self.name,
             register_address=self.register_address,
             bit_index=self.bit_index,
+            slave_id=self.slave_id,
             label=self.label,
         )
-

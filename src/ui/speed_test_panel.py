@@ -1,5 +1,6 @@
 """
 Speed test panel for measuring Modbus read performance.
+Supports multi-device with device selector.
 """
 
 import time
@@ -7,7 +8,7 @@ from typing import List, Dict, Tuple
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QSpinBox, QLabel, QGroupBox, QScrollArea, QCheckBox,
-    QFrame, QApplication
+    QFrame, QApplication, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, Slot
 
@@ -25,11 +26,12 @@ class SpeedTestWorker(QThread):
     error = Signal(str)
     
     def __init__(self, modbus: ModbusManager, registers: List[Register], num_samples: int,
-                 use_batching: bool = False, clear_buffers: bool = True, close_port: bool = False):
+                 slave_id: int, use_batching: bool = False, clear_buffers: bool = True, close_port: bool = False):
         super().__init__()
         self.modbus = modbus
         self.registers = registers
         self.num_samples = num_samples
+        self.slave_id = slave_id
         self.use_batching = use_batching
         self.clear_buffers = clear_buffers
         self.close_port = close_port
@@ -89,6 +91,9 @@ class SpeedTestWorker(QThread):
             # Apply test settings
             instrument.clear_buffers_before_each_transaction = self.clear_buffers
             instrument.close_port_after_each_call = self.close_port
+            
+            # Set slave ID for this test
+            self.modbus.set_slave_id(self.slave_id)
             
             # Prepare batches if enabled
             if self.use_batching:
@@ -150,14 +155,15 @@ class SpeedTestWorker(QThread):
 
 
 class SpeedTestPanel(QWidget):
-    """Panel for testing Modbus read speed."""
+    """Panel for testing Modbus read speed with device selector."""
     
     def __init__(self, modbus: ModbusManager, data_engine: DataEngine, parent=None):
         super().__init__(parent)
         self.modbus = modbus
         self.data_engine = data_engine
         self.registers: List[Register] = []
-        self._register_checkboxes: Dict[int, QCheckBox] = {}
+        self._register_checkboxes: Dict[int, QCheckBox] = {}  # address -> checkbox
+        self._current_device_regs: List[Register] = []  # registers for current device
         self.worker: SpeedTestWorker = None
         self._was_polling = False
         
@@ -166,6 +172,17 @@ class SpeedTestPanel(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
+        
+        # Device selector at top
+        device_group = QGroupBox("Device Selection")
+        device_layout = QHBoxLayout(device_group)
+        device_layout.addWidget(QLabel("Device:"))
+        self.device_combo = QComboBox()
+        self.device_combo.setMinimumWidth(150)
+        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
+        device_layout.addWidget(self.device_combo)
+        device_layout.addStretch()
+        layout.addWidget(device_group)
         
         # Register selection group
         reg_group = QGroupBox("Available Registers")
@@ -268,7 +285,7 @@ class SpeedTestPanel(QWidget):
         self.freq_value_label.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLORS['accent']}; margin: 10px 0;")
         results_layout.addWidget(self.freq_value_label)
         
-        self.status_label = QLabel("Select registers and press Start")
+        self.status_label = QLabel("Select a device and registers, then press Start")
         self.status_label.setObjectName("subheading")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         results_layout.addWidget(self.status_label)
@@ -279,14 +296,51 @@ class SpeedTestPanel(QWidget):
         """Update available registers."""
         self.registers = registers
         
+        # Update device combo
+        self._update_device_combo()
+        
+    def _update_device_combo(self):
+        """Update device combo with available devices."""
+        self.device_combo.blockSignals(True)
+        current_device = self.device_combo.currentData()
+        self.device_combo.clear()
+        
+        # Get unique slave IDs
+        slave_ids = sorted(set(reg.slave_id for reg in self.registers))
+        
+        for slave_id in slave_ids:
+            count = sum(1 for r in self.registers if r.slave_id == slave_id)
+            self.device_combo.addItem(f"Device {slave_id} ({count} regs)", slave_id)
+        
+        # Restore selection or select first
+        if current_device is not None:
+            index = self.device_combo.findData(current_device)
+            if index >= 0:
+                self.device_combo.setCurrentIndex(index)
+        
+        self.device_combo.blockSignals(False)
+        self._on_device_changed()
+    
+    def _on_device_changed(self):
+        """Handle device selection change."""
+        slave_id = self.device_combo.currentData()
+        
         # Clear existing checkboxes
         for cb in self._register_checkboxes.values():
             cb.deleteLater()
         self._register_checkboxes.clear()
         
+        if slave_id is None:
+            self._current_device_regs = []
+            return
+        
+        # Filter registers for selected device
+        self._current_device_regs = [r for r in self.registers if r.slave_id == slave_id]
+        
         # Add new checkboxes
-        for reg in registers:
+        for reg in self._current_device_regs:
             cb = QCheckBox(reg.label or f"R{reg.address}")
+            cb.setToolTip(reg.designator)
             self.scroll_layout.addWidget(cb)
             self._register_checkboxes[reg.address] = cb
             
@@ -296,7 +350,7 @@ class SpeedTestPanel(QWidget):
         if not connected:
             self.status_label.setText("Modbus not connected")
         else:
-            self.status_label.setText("Select registers and press Start")
+            self.status_label.setText("Select a device and registers, then press Start")
             
     def _select_all(self):
         for cb in self._register_checkboxes.values():
@@ -312,9 +366,15 @@ class SpeedTestPanel(QWidget):
             self.start_btn.setText("Stopping...")
             self.start_btn.setEnabled(False)
             return
+        
+        slave_id = self.device_combo.currentData()
+        if slave_id is None:
+            self.status_label.setText("Error: No device selected")
+            self.status_label.setStyleSheet(f"color: {COLORS['error']};")
+            return
             
         selected_addresses = [addr for addr, cb in self._register_checkboxes.items() if cb.isChecked()]
-        selected_registers = [reg for reg in self.registers if reg.address in selected_addresses]
+        selected_registers = [reg for reg in self._current_device_regs if reg.address in selected_addresses]
         
         if not selected_registers:
             self.status_label.setText("Error: No registers selected")
@@ -328,13 +388,14 @@ class SpeedTestPanel(QWidget):
             
         self.start_btn.setText("Stop Test")
         self.freq_value_label.setText("Testing...")
-        self.status_label.setText("Reading registers at max speed...")
+        self.status_label.setText(f"Reading registers from Device {slave_id} at max speed...")
         self.status_label.setStyleSheet("")
         
         self.worker = SpeedTestWorker(
             self.modbus,
             selected_registers,
             self.samples_spin.value(),
+            slave_id=slave_id,
             use_batching=self.batch_check.isChecked(),
             clear_buffers=self.clear_buffers_check.isChecked(),
             close_port=self.close_port_check.isChecked()

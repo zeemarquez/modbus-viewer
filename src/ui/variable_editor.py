@@ -1,5 +1,6 @@
 """
 Variable editor dialog for creating/editing computed variables.
+Supports multi-device with D<id>.R<addr> syntax.
 """
 
 from typing import List, Optional
@@ -7,7 +8,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QPlainTextEdit, QPushButton,
-    QDialogButtonBox, QLabel, QGroupBox, QMessageBox
+    QDialogButtonBox, QLabel, QGroupBox, QMessageBox, QCheckBox
 )
 from PySide6.QtCore import Qt
 
@@ -18,7 +19,7 @@ from src.ui.expression_highlighter import ExpressionHighlighter
 
 
 class VariableEditorDialog(QDialog):
-    """Dialog for creating or editing a variable."""
+    """Dialog for creating or editing a variable with multi-device support."""
     
     def __init__(self, variable: Optional[Variable] = None, 
                  registers: List[Register] = None,
@@ -31,7 +32,7 @@ class VariableEditorDialog(QDialog):
         self.evaluator = evaluator or VariableEvaluator()
         
         self.setWindowTitle("Edit Variable" if variable else "New Variable")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(550, 450)
         self.setModal(True)
         
         self._setup_ui()
@@ -47,13 +48,14 @@ class VariableEditorDialog(QDialog):
         info_layout = QFormLayout(info_group)
         info_layout.setSpacing(8)
         
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("e.g., avg_temp, total_power")
-        info_layout.addRow("Name:", self.name_edit)
-        
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("e.g., Average Temperature")
         info_layout.addRow("Label:", self.label_edit)
+        
+        self.is_global_check = QCheckBox("Global Variable")
+        self.is_global_check.setToolTip("Global variables can use registers from any device (D1.R0). \nNon-global variables are replicated for every device and use its own registers (R0).")
+        self.is_global_check.toggled.connect(self._on_global_toggled)
+        info_layout.addRow(self.is_global_check)
         
         self.format_combo = QComboBox()
         for fmt in VariableFormat:
@@ -71,7 +73,7 @@ class VariableEditorDialog(QDialog):
         self.expression_edit = QPlainTextEdit()
         self.expression_edit.setMaximumHeight(100)
         self.expression_edit.setPlaceholderText(
-            "e.g., R0 + R1, R0 * 0.5, sqrt(R0**2 + R1**2)"
+            "e.g., D1.R0 + D1.R1, D1.R0 * 0.5, sqrt(D1.R0**2 + D2.R0**2)"
         )
         self.expression_edit.textChanged.connect(self._on_expression_changed)
         
@@ -82,22 +84,29 @@ class VariableEditorDialog(QDialog):
         
         # Help text
         help_label = QLabel(
-            "Use R<address> for registers (e.g., R0, R100). "
+            "Use D<id>.R<addr> for registers (e.g., D1.R0, D2.R100). "
+            "Legacy R<addr> syntax defaults to Device 1.\n"
             "Functions: abs, min, max, sqrt, round, sin, cos, tan, log, exp"
         )
         help_label.setStyleSheet("color: #757575; font-size: 11px;")
+        help_label.setWordWrap(True)
         expr_layout.addWidget(help_label)
         
-        # Insert register
+        # Insert register - device selector
         insert_layout = QHBoxLayout()
-        insert_layout.addWidget(QLabel("Register:"))
+        
+        self.device_combo = QComboBox()
+        self.device_combo.setMinimumWidth(100)
+        self._populate_device_combo()
+        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
+        insert_layout.addWidget(self.device_combo)
         
         self.register_combo = QComboBox()
         self.register_combo.setMinimumWidth(200)
         self._populate_register_combo()
         insert_layout.addWidget(self.register_combo)
         
-        insert_btn = QPushButton("Insert Register")
+        insert_btn = QPushButton("Insert")
         insert_btn.clicked.connect(self._insert_register)
         insert_layout.addWidget(insert_btn)
         
@@ -144,18 +153,50 @@ class VariableEditorDialog(QDialog):
         }
         return names.get(fmt, fmt.value)
     
+    def _on_global_toggled(self, checked: bool) -> None:
+        """Handle global checkbox toggle."""
+        # Show/hide device selector based on global status
+        self.device_combo.setVisible(checked)
+        self._update_preview()
+    
+    def _populate_device_combo(self) -> None:
+        """Populate the device selection combo."""
+        self.device_combo.clear()
+        
+        # Get unique slave IDs from registers
+        slave_ids = sorted(set(reg.slave_id for reg in self.registers))
+        
+        for slave_id in slave_ids:
+            count = sum(1 for r in self.registers if r.slave_id == slave_id)
+            self.device_combo.addItem(f"D{slave_id} ({count} regs)", slave_id)
+    
     def _populate_register_combo(self) -> None:
-        """Populate the register selection combo."""
+        """Populate the register selection combo for current device."""
         self.register_combo.clear()
-        for reg in self.registers:
+        
+        current_device = self.device_combo.currentData()
+        if current_device is None:
+            return
+        
+        # Filter registers for selected device
+        device_regs = [r for r in self.registers if r.slave_id == current_device]
+        
+        for reg in device_regs:
             label = reg.label if reg.label else f"Address {reg.address}"
             self.register_combo.addItem(f"R{reg.address}: {label}", reg)
     
+    def _on_device_changed(self) -> None:
+        """Handle device selection change."""
+        self._populate_register_combo()
+    
     def _populate_fields(self) -> None:
         """Populate fields from variable."""
-        self.name_edit.setText(self.variable.name)
-        self.label_edit.setText(self.variable.label)
+        self.label_edit.setText(self.variable.label if self.variable.label else self.variable.name)
+        self.is_global_check.setChecked(self.variable.is_global)
         self.expression_edit.setPlainText(self.variable.expression)
+        
+        # Set visibility
+        self.device_combo.setVisible(self.variable.is_global)
         
         # Set format
         for i in range(self.format_combo.count()):
@@ -166,11 +207,18 @@ class VariableEditorDialog(QDialog):
         self._update_preview()
     
     def _insert_register(self) -> None:
-        """Insert selected register by address."""
+        """Insert selected register with device prefix if global."""
         reg = self.register_combo.currentData()
+        
         if reg:
             cursor = self.expression_edit.textCursor()
-            cursor.insertText(f"R{reg.address}")
+            if self.is_global_check.isChecked():
+                slave_id = self.device_combo.currentData()
+                if slave_id is not None:
+                    cursor.insertText(f"D{slave_id}.R{reg.address}")
+            else:
+                cursor.insertText(f"R{reg.address}")
+            
             self.expression_edit.setFocus()
             self._update_preview()
     
@@ -181,14 +229,29 @@ class VariableEditorDialog(QDialog):
     def _update_preview(self) -> None:
         """Update the result preview."""
         expression = self.expression_edit.toPlainText().strip()
+        is_global = self.is_global_check.isChecked()
         
         if not expression:
             self.result_label.setText("---")
             self.error_label.setText("")
             return
         
+        # For non-global variables, we use Device 1 for preview if available
+        preview_expr = expression
+        if not is_global:
+            # Check if there are registers to use
+            if not self.registers:
+                self.result_label.setText("---")
+                self.error_label.setText("Add registers to preview")
+                return
+            
+            # Map R<addr> to D<sid>.R<addr> for preview using first sid
+            first_sid = sorted(set(r.slave_id for r in self.registers))[0]
+            import re
+            preview_expr = re.sub(r'(?<!\.)\bR(\d+)\b', f'D{first_sid}.R\\1', expression)
+        
         # Validate
-        error = self.evaluator.validate(expression)
+        error = self.evaluator.validate(preview_expr)
         if error:
             self.result_label.setText("---")
             self.error_label.setText(f"Error: {error}")
@@ -196,7 +259,7 @@ class VariableEditorDialog(QDialog):
         
         # Try to evaluate
         try:
-            value = self.evaluator.evaluate(expression)
+            value = self.evaluator.evaluate(preview_expr)
             
             # Format with selected format
             fmt = self.format_combo.currentData()
@@ -211,13 +274,9 @@ class VariableEditorDialog(QDialog):
     
     def _validate(self) -> Optional[str]:
         """Validate the variable configuration."""
-        name = self.name_edit.text().strip()
-        if not name:
-            return "Name is required"
-        
-        # Check name is valid identifier
-        if not name.replace('_', '').replace('-', '').isalnum():
-            return "Name must contain only letters, numbers, underscores, or hyphens"
+        label = self.label_edit.text().strip()
+        if not label:
+            return "Label is required"
         
         expression = self.expression_edit.toPlainText().strip()
         if not expression:
@@ -237,10 +296,21 @@ class VariableEditorDialog(QDialog):
             return
         
         # Update variable
-        self.variable.name = self.name_edit.text().strip()
-        self.variable.label = self.label_edit.text().strip()
+        label = self.label_edit.text().strip()
+        self.variable.label = label
+        # Generate name from label: lowercase, replace non-alphanumeric with underscores
+        import re
+        name = re.sub(r'[^a-zA-Z0-9]', '_', label).lower()
+        # Ensure it doesn't start with a number
+        if name and name[0].isdigit():
+            name = "v_" + name
+        if not name:
+            name = "var_" + str(hash(label) & 0xffff)
+            
+        self.variable.name = name
         self.variable.expression = self.expression_edit.toPlainText().strip()
         self.variable.format = self.format_combo.currentData()
+        self.variable.is_global = self.is_global_check.isChecked()
         
         self.accept()
     
