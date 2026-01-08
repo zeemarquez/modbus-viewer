@@ -10,9 +10,7 @@ if not exist "venv\Scripts\pythonw.exe" (
     exit /b
 )
 
-REM Use pythonw.exe to run the GUI without a console window
-start "" "venv\Scripts\pythonw.exe" main.py
+REM Launch Modbus Explorer
+start "" "venv\Scripts\pythonw.exe" explorer_main.py
 
-REM The console window will close immediately after launching the app
 exit
-

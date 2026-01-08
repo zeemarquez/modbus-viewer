@@ -22,8 +22,8 @@ class Bit:
     
     @property
     def designator(self) -> str:
-        """Get the full designator for this bit's register (e.g., D1.R13)."""
-        return f"D{self.slave_id}.R{self.register_address}"
+        """Get the full designator for this bit (e.g., D1.R13.B5)."""
+        return f"D{self.slave_id}.R{self.register_address}.B{self.bit_index}"
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

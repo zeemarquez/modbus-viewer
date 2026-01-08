@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Modbus Viewer - A modern GUI for Modbus RTU communication
+Modbus Explorer - A modern GUI for Modbus RTU communication
 """
 
 import sys
@@ -35,8 +35,8 @@ def main():
     )
     
     app = QApplication(sys.argv)
-    app.setApplicationName("Modbus Viewer")
-    app.setOrganizationName("ModbusViewer")
+    app.setApplicationName("Modbus Explorer")
+    app.setOrganizationName("ModbusExplorer")
     
     # Set window icon if it exists
     icon_paths = [

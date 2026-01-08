@@ -1,0 +1,51 @@
+{
+  "admin_password": "admin123",
+  "project_path": "C:/Users/zeemarquez/python-lab/modbus-viewer/examples/TRITON2_01.json",
+  "port": "COM11",
+  "baud_rate": 115200,
+  "parity": "N",
+  "stop_bits": 1,
+  "timeout": 1.0,
+  "slave_ids": [
+    1,
+    4
+  ],
+  "hidden_registers": [
+    "R0",
+    "R1",
+    "R5",
+    "R6",
+    "R7",
+    "R8",
+    "R9",
+    "R10",
+    "R11",
+    "R12",
+    "R13",
+    "R14",
+    "R15",
+    "R16",
+    "R50",
+    "R52",
+    "R54"
+  ],
+  "hidden_columns": [
+    "Address",
+    "Size",
+    "New Value"
+  ],
+  "hidden_variables": [],
+  "hidden_variables_columns": [
+    "Expression"
+  ],
+  "hidden_bits": [
+    "D1.R6",
+    "D1.R6.B0",
+    "D1.R6.B5"
+  ],
+  "hidden_bits_columns": [],
+  "scan_timeout": 0.05,
+  "scan_slave_limit": 10,
+  "layout_state": "AAAA/wAAAAD9AAAAAQAAAAIAAAW3AAAC4PwBAAAAAfwAAAAAAAAFtwAAAaQA/////AEAAAAC+wAAABAAUABsAG8AdABEAG8AYwBrAQAAAAAAAARtAAAA6wD////8AAAEcQAAAUYAAAC1AP////wCAAAAA/sAAAASAFQAYQBiAGwAZQBEAG8AYwBrAQAAAFIAAAFhAAAAfgD////7AAAAGgBWAGEAcgBpAGEAYgBsAGUAcwBEAG8AYwBrAQAAAbcAAAC2AAAAfgD////7AAAAEABCAGkAdABzAEQAbwBjAGsBAAACcQAAAMEAAAB+AP///wAABbcAAAAAAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAaAFYAaQBlAHcAZQByAFQAbwBvAGwAYgBhAHIBAAAAAP////8AAAAAAAAAAA==",
+  "geometry": "AdnQywADAAAAAAAA////+QAABbYAAANhAAAA6AAAAIUAAATPAAAC5QAAAAACAAAABbcAAAAAAAAAFwAABbYAAANh"
+}

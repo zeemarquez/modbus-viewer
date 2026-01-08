@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         self._connected_slave_ids: list = []
         
         # Setup UI
-        self.setWindowTitle("Modbus Viewer")
+        self.setWindowTitle("Modbus Explorer")
         self.setMinimumSize(1200, 700)
         
         # Explicitly set window icon (helps on some Windows versions)
@@ -597,7 +597,7 @@ class MainWindow(QMainWindow):
         self._connected_slave_ids = []
         self._update_device_menu()
         self._update_ui_from_project()
-        self.setWindowTitle("Modbus Viewer - Untitled")
+        self.setWindowTitle("Modbus Explorer - Untitled")
     
     def _open_project(self) -> None:
         """Open project file."""
@@ -618,7 +618,7 @@ class MainWindow(QMainWindow):
             self.project = Project.load(file_path)
             
             self._update_ui_from_project()
-            self.setWindowTitle(f"Modbus Viewer - {self.project.name}")
+            self.setWindowTitle(f"Modbus Explorer - {self.project.name}")
             
             # Save as last opened project
             settings = QSettings()
@@ -649,7 +649,7 @@ class MainWindow(QMainWindow):
                 file_path += '.json'
             self.project.file_path = file_path
             self._do_save()
-            self.setWindowTitle(f"Modbus Viewer - {self.project.name}")
+            self.setWindowTitle(f"Modbus Explorer - {self.project.name}")
     
     def _do_save(self) -> None:
         """Actually save the project."""
@@ -888,7 +888,7 @@ class MainWindow(QMainWindow):
                 break
 
         about_text = (
-            "<h2>Modbus Viewer</h2>"
+            "<h2>Modbus Explorer</h2>"
             "<p>A modern GUI for Modbus RTU communication.</p>"
             "<p>Features:</p>"
             "<ul>"
@@ -904,7 +904,7 @@ class MainWindow(QMainWindow):
             # Add icon to about dialog if it exists
             about_text = f"<table><tr><td><img src='{icon_path}' width='64'></td><td style='padding-left: 20px;'>{about_text}</td></tr></table>"
 
-        QMessageBox.about(self, "About Modbus Viewer", about_text)
+        QMessageBox.about(self, "About Modbus Explorer", about_text)
     
     # Event handlers
     
