@@ -4,6 +4,7 @@ Minimalist main window for Modbus Viewer.
 
 import os
 import base64
+import uuid
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QStatusBar, QFileDialog, QMessageBox, 
@@ -20,7 +21,7 @@ from src.core.data_engine import DataEngine
 from src.utils.serial_ports import get_available_ports
 from src.ui.viewer.components import (
     ViewerTableView, ViewerPlotView, ViewerVariablesPanel, ViewerBitsPanel,
-    MinimalScanDialog
+    MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel
 )
 from src.ui.scan_dialog import ScanWorker
 from src.ui.styles import COLORS
@@ -71,6 +72,10 @@ class ViewerWindow(QMainWindow):
         
         self.is_admin = False  # Start as user by default
         self._found_devices = []
+        
+        # Clean devices on startup - User must scan first
+        self.config.slave_ids = []
+        self.config.save()
         
         # Setup UI
         self.setWindowTitle("Modbus Viewer")
@@ -154,53 +159,35 @@ class ViewerWindow(QMainWindow):
         self.tabifyDockWidget(self.plot_dock, self.variables_dock)
         self.tabifyDockWidget(self.variables_dock, self.bits_dock)
         
-        # Toolbar
-        self.toolbar = QToolBar("Viewer Toolbar")
-        self.toolbar.setObjectName("ViewerToolbar")
-        self.toolbar.setMovable(False)
-        self.addToolBar(self.toolbar)
+        # Connection Dock (Replacing Toolbar)
+        self.connection_dock = QDockWidget("Connection", self)
+        self.connection_dock.setObjectName("ConnectionDock")
+        self.connection_panel = ConnectionPanel()
+        self.connection_dock.setWidget(self.connection_panel)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.connection_dock)
         
-        self.toolbar.addWidget(QLabel(" Port: "))
-        self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(150)
-        self.toolbar.addWidget(self.port_combo)
+        # Link references for backward compatibility with existing logic
+        self.port_combo = self.connection_panel.port_combo
+        self.device_btn = self.connection_panel.device_btn
+        self.device_menu = self.connection_panel.device_menu
         
-        self.refresh_ports_action = QAction("↻", self)
-        self.refresh_ports_action.triggered.connect(self._refresh_ports)
-        self.toolbar.addAction(self.refresh_ports_action)
+        # Connect signals from the panel
+        self.connection_panel.refresh_ports.connect(self._refresh_ports)
+        self.connection_panel.perform_scan.connect(self._perform_scan)
+        self.connection_panel.toggle_connection.connect(self._toggle_connection)
+        self.connection_panel.device_menu_hide.connect(self._on_device_menu_about_to_hide)
         
-        self.toolbar.addSeparator()
-        
-        self.scan_action = QAction("Scan", self)
-        self.scan_action.setToolTip("Scan for Modbus devices")
-        self.scan_action.triggered.connect(self._perform_scan)
-        self.toolbar.addAction(self.scan_action)
-        
-        self.toolbar.addSeparator()
-        
-        # Device Selection (multi-select dropdown)
-        self.device_btn = QToolButton()
-        self.device_btn.setText("Select Devices")
-        self.device_btn.setMinimumWidth(150)
-        self.device_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.device_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
-        self.device_btn.setToolTip("Select devices to connect to (multi-select)")
-        
-        self.device_menu = QMenu(self)
-        self.device_btn.setMenu(self.device_menu)
-        self.device_menu.aboutToHide.connect(self._on_device_menu_about_to_hide)
-        self.toolbar.addWidget(self.device_btn)
-        
-        self.toolbar.addSeparator()
-        
-        # Connect Action
-        self.connect_action = QAction("Connect", self)
-        self.connect_action.setCheckable(True)
-        self.connect_action.triggered.connect(self._toggle_connection)
-        self.toolbar.addAction(self.connect_action)
+        # Need a reference to the connect button for status updates in code
+        self.connect_action = self.connection_panel.connect_btn
         
         # Menu Bar
         self._setup_menu()
+        
+        # Global shortcut (Ctrl+T) for toggling connection panel
+        self.toggle_connection_action = QAction("Toggle Connection Panel", self)
+        self.toggle_connection_action.setShortcut("Ctrl+T")
+        self.toggle_connection_action.triggered.connect(self._on_toggle_connection_dock)
+        self.addAction(self.toggle_connection_action)
         
         # Status Bar
         self.statusbar = QStatusBar()
@@ -212,6 +199,9 @@ class ViewerWindow(QMainWindow):
         
         self.poll_label = QLabel("Poll: --")
         self.statusbar.addPermanentWidget(self.poll_label)
+        
+        # Initialize button states
+        self._update_connection_button_state()
 
     def _setup_menu(self):
         """Setup the top menu bar."""
@@ -220,25 +210,72 @@ class ViewerWindow(QMainWindow):
         
         self.options_menu = menubar.addMenu("Options")
         self.view_menu = menubar.addMenu("View")
+        self.insert_menu = menubar.addMenu("Insert")
         self._update_options_menu()
         self._update_view_menu()
+        self._update_insert_menu()
 
     def _update_view_menu(self):
-        """Update View menu with dock toggle actions."""
+        """Update View menu with dock toggle actions for all current docks."""
         self.view_menu.clear()
         self.view_menu.setEnabled(self.is_admin)
+        self.view_menu.menuAction().setVisible(self.is_admin)
+        
+        if not self.is_admin:
+            return
+            
+        # Get all current docks
+        all_docks = self.findChildren(QDockWidget)
+        
+        # Sort them: fixed docks first, then others
+        fixed_names = ["ConnectionDock", "TableDock", "PlotDock", "VariablesDock", "BitsDock"]
+        
+        # Connection first
+        conn_dock = next((d for d in all_docks if d.objectName() == "ConnectionDock"), None)
+        if conn_dock:
+            action = conn_dock.toggleViewAction()
+            action.setText("Connection Panel")
+            action.setShortcut("Ctrl+T")
+            self.view_menu.addAction(action)
+            self.view_menu.addSeparator()
+            
+        # Other fixed docks
+        for name in fixed_names[1:]:
+            dock = next((d for d in all_docks if d.objectName() == name), None)
+            if dock:
+                display_name = name.replace("Dock", "")
+                action = dock.toggleViewAction()
+                action.setText(display_name)
+                self.view_menu.addAction(action)
+                
+        # Dynamic panels (Text, Image)
+        dynamic_docks = [d for d in all_docks if d.objectName() not in fixed_names]
+        if dynamic_docks:
+            self.view_menu.addSeparator()
+            for dock in dynamic_docks:
+                action = dock.toggleViewAction()
+                # Clean up the name for the menu (e.g., "TextPanel_abcd" -> "Text Panel (abcd)")
+                raw_name = dock.objectName()
+                if "_" in raw_name:
+                    type_str, id_str = raw_name.split("_", 1)
+                    # Insert space: TextPanel -> Text Panel
+                    import re
+                    type_str = re.sub(r"([a-z])([A-Z])", r"\1 \2", type_str)
+                    action.setText(f"{type_str} ({id_str})")
+                self.view_menu.addAction(action)
+
+    def _update_insert_menu(self):
+        """Update Insert menu based on admin state."""
+        self.insert_menu.clear()
+        self.insert_menu.setEnabled(self.is_admin)
+        self.insert_menu.menuAction().setVisible(self.is_admin)
         
         if self.is_admin:
-            docks = [
-                (self.table_dock, "Registers"),
-                (self.plot_dock, "Plot"),
-                (self.variables_dock, "Variables"),
-                (self.bits_dock, "Bits")
-            ]
-            for dock, name in docks:
-                action = dock.toggleViewAction()
-                action.setText(name)
-                self.view_menu.addAction(action)
+            text_action = self.insert_menu.addAction("Text Panel")
+            text_action.triggered.connect(self._add_text_panel)
+            
+            image_action = self.insert_menu.addAction("Image Panel")
+            image_action.triggered.connect(self._add_image_panel)
 
     def _update_options_menu(self):
         """Update Options menu based on admin state."""
@@ -317,6 +354,7 @@ class ViewerWindow(QMainWindow):
         if selected != self.config.slave_ids:
             self._update_active_devices(sorted(selected))
             self._update_device_btn_text()
+            self._update_connection_button_state()
 
     def _update_device_btn_text(self):
         """Update the device button text based on selection."""
@@ -330,6 +368,11 @@ class ViewerWindow(QMainWindow):
             self.device_btn.setText(f"Device {selected[0]}")
         else:
             self.device_btn.setText(f"{len(selected)} Devices")
+    
+    def _update_connection_button_state(self):
+        """Enable/disable connect button based on device selection."""
+        has_devices = len(self.config.slave_ids) > 0
+        self.connect_action.setEnabled(has_devices)
 
     def _perform_scan(self):
         port = self.port_combo.currentData()
@@ -365,19 +408,21 @@ class ViewerWindow(QMainWindow):
         """Update the device selection menu."""
         self.device_menu.clear()
         
-        # Combine project devices and found devices
-        project_ids = []
-        if hasattr(self, 'project') and self.project:
-            project_ids = [r.slave_id for r in self.project.registers]
-        
-        all_ids = sorted(list(set(project_ids + self._found_devices + self.config.slave_ids)))
+        # Show only found devices and current selection
+        # (Exclude project_ids to force scan first as requested)
+        all_ids = sorted(list(set(self._found_devices + self.config.slave_ids)))
         
         if not all_ids:
             no_devices_action = QAction("No devices found", self)
             no_devices_action.setEnabled(False)
             self.device_menu.addAction(no_devices_action)
-            self.device_btn.setText("Select Devices")
+            self.device_btn.setText("No devices")
+            self.device_btn.setEnabled(False)
+            self._update_connection_button_state()
             return
+        
+        # Enable device button when devices are found
+        self.device_btn.setEnabled(True)
 
         # Add select all / deselect all actions
         select_all_action = QAction("Select All", self)
@@ -399,6 +444,7 @@ class ViewerWindow(QMainWindow):
             self.device_menu.addAction(action)
         
         self._update_device_btn_text()
+        self._update_connection_button_state()
 
     def _select_all_devices(self):
         """Select all devices."""
@@ -460,7 +506,7 @@ class ViewerWindow(QMainWindow):
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
 
     def _sync_registers(self):
-        slave_ids = self.config.slave_ids if self.config.slave_ids else [1]
+        slave_ids = self.config.slave_ids
         
         # Sync Table
         self.table_view.set_registers(self.project.registers)
@@ -506,29 +552,41 @@ class ViewerWindow(QMainWindow):
         # Refresh the menus
         self._update_options_menu()
         self._update_view_menu()
+        self._update_insert_menu()
         
-        # Enable dragging/floating only for admin
-        if self.is_admin:
-            features = (
-                QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                QDockWidget.DockWidgetFeature.DockWidgetFloatable
-            )
-        else:
-            features = QDockWidget.DockWidgetFeature.NoDockWidgetFeatures
+        # Enumerate all docks to set features and admin mode
+        for dock in self.findChildren(QDockWidget):
+            # Known fixed docks
+            is_fixed = dock.objectName() in ("TableDock", "PlotDock", "VariablesDock", "BitsDock", "ConnectionDock")
             
-        self.table_dock.setFeatures(features)
-        self.plot_dock.setFeatures(features)
-        self.variables_dock.setFeatures(features)
-        self.bits_dock.setFeatures(features)
+            if self.is_admin:
+                features = (
+                    QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                    QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                    QDockWidget.DockWidgetFeature.DockWidgetClosable
+                )
+                dock.setFeatures(features)
+                dock.setTitleBarWidget(None) # Show title for dragging and closing
+            else:
+                dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+                # Hide title for extra panels, connection, and plot panels in user mode
+                if not is_fixed or dock.objectName() in ("ConnectionDock", "PlotDock"):
+                    dock.setTitleBarWidget(QWidget()) # Hide title
+            
+            # Propagate admin mode to widgets
+            if hasattr(dock.widget(), 'set_admin_mode'):
+                dock.widget().set_admin_mode(self.is_admin, self.config)
         
-        # In simple viewer, hide plot options and maximize buttons from regular users
-        self.plot_view.options_btn.setVisible(self.is_admin)
-        self.plot_view.maximize_btn.setVisible(self.is_admin)
-        self.plot_view.clear_btn.setVisible(self.is_admin)
+        # Show plot options and clear buttons to all users
+        self.plot_view.options_btn.setVisible(True)
+        self.plot_view.clear_btn.setVisible(True)
+        # Remove maximize plot button
+        self.plot_view.maximize_btn.setVisible(False)
         
         self.table_view.set_admin_mode(self.is_admin, self.config)
         self.variables_panel.set_admin_mode(self.is_admin, self.config)
         self.bits_panel.set_admin_mode(self.is_admin, self.config)
+        self.plot_view.set_admin_mode(self.is_admin, self.config)
 
     def _import_project(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import Registers", "", "JSON (*.json)")
@@ -544,13 +602,8 @@ class ViewerWindow(QMainWindow):
             self.variables_panel.project = self.project
             self.bits_panel.project = self.project
             
-            # Populate combo with project's devices
-            slave_ids = sorted(list(set(r.slave_id for r in self.project.registers)))
+            # Populate combo - strictly via _update_device_menu
             self._update_device_menu()
-            
-            # Default to first one or all if none selected
-            if slave_ids and not self.config.slave_ids:
-                self._update_active_devices([slave_ids[0]])
             
             self._sync_registers()
             self._update_ui_state()
@@ -644,8 +697,46 @@ class ViewerWindow(QMainWindow):
         else:
             self.poll_label.setText("Poll: --")
 
+    def _on_toggle_connection_dock(self):
+        """Toggle connection dock visibility via shortcut."""
+        self.connection_dock.setVisible(not self.connection_dock.isVisible())
+
+    def _add_text_panel(self, settings=None, object_name=None):
+        """Add a new text panel dock."""
+        panel = ViewerTextPanel()
+        if settings:
+            panel.set_settings(settings)
+            
+        dock = QDockWidget("Text Panel", self)
+        # Use provided object name (for loading) or a new random one
+        dock.setObjectName(object_name if object_name else f"TextPanel_{uuid.uuid4().hex[:8]}")
+        dock.setWidget(panel)
+        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        self._update_ui_state()
+
+    def _add_image_panel(self, image_path=None, object_name=None):
+        """Add a new image panel dock."""
+        panel = ViewerImagePanel()
+        if image_path:
+            panel.load_image(image_path)
+            
+        dock = QDockWidget("Image Panel", self)
+        dock.setObjectName(object_name if object_name else f"ImagePanel_{uuid.uuid4().hex[:8]}")
+        dock.setWidget(panel)
+        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        self._update_ui_state()
+
     def _load_settings(self):
         """Load window geometry and dock layout."""
+        # Recreate custom panels first so restoreState can find them
+        for p_data in self.config.text_panels:
+            self._add_text_panel(settings=p_data, object_name=p_data.get("object_name"))
+            
+        for p_data in self.config.image_panels:
+            self._add_image_panel(image_path=p_data.get("path"), object_name=p_data.get("object_name"))
+
         if self.config.geometry:
             try:
                 geom = base64.b64decode(self.config.geometry)
@@ -662,6 +753,29 @@ class ViewerWindow(QMainWindow):
 
     def _save_settings(self):
         """Save window geometry and dock layout."""
+        # Collect dynamic panels
+        text_panels = []
+        image_panels = []
+        
+        for dock in self.findChildren(QDockWidget):
+            obj_name = dock.objectName()
+            if obj_name.startswith("TextPanel_"):
+                widget = dock.widget()
+                if isinstance(widget, ViewerTextPanel):
+                    data = widget.get_settings()
+                    data["object_name"] = obj_name
+                    text_panels.append(data)
+            elif obj_name.startswith("ImagePanel_"):
+                widget = dock.widget()
+                if isinstance(widget, ViewerImagePanel):
+                    image_panels.append({
+                        "object_name": obj_name,
+                        "path": widget._image_path
+                    })
+                    
+        self.config.text_panels = text_panels
+        self.config.image_panels = image_panels
+
         geom = self.saveGeometry().data()
         self.config.geometry = base64.b64encode(geom).decode('utf-8')
         

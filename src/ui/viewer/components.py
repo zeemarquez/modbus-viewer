@@ -1,10 +1,14 @@
+import os
 from PySide6.QtWidgets import (
     QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem, 
     QHeaderView, QMenu, QCheckBox, QWidget, QAbstractItemView, QLabel,
-    QDialog, QProgressBar, QPushButton
+    QDialog, QProgressBar, QPushButton, QLineEdit, QHBoxLayout,
+    QSizePolicy, QFileDialog, QFontDialog, QColorDialog,
+    QFontComboBox, QSpinBox, QComboBox, QToolButton
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtGui import QColor, QBrush, QPixmap, QAction
+import pyqtgraph as pg
 from src.ui.table_view import TableView
 from src.ui.plot_view import PlotView
 from src.ui.variables_panel import VariablesPanel
@@ -36,6 +40,7 @@ class ViewerTableView(TableView):
 
     def _setup_ui(self) -> None:
         """Setup the table UI without the toolbar."""
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -64,6 +69,7 @@ class ViewerTableView(TableView):
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_menu)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         
         return table
 
@@ -241,14 +247,140 @@ class ViewerTableView(TableView):
 class ViewerPlotView(PlotView):
     """Modified PlotView for the viewer."""
     
-    def _setup_ui(self) -> None:
-        """Setup the plot UI (can be further customized if needed)."""
-        # For now, reuse parent but we could hide specific buttons here
-        super()._setup_ui()
-        # For example, we could hide the 'Options' or 'Maximize' button in user mode
-        # For example, we could hide the 'Options' or 'Maximize' button in user mode
-        # self.maximize_btn.setVisible(False)
-        pass
+    def set_admin_mode(self, is_admin: bool, config=None):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        self.is_admin = is_admin
+        self.config = config
+        
+        if self.config:
+            # Load visual settings
+            self._line_width = self.config.plot_line_width
+            self._grid_alpha = self.config.plot_grid_alpha
+            self._show_legend = self.config.plot_show_legend
+            self._y_auto_scale = self.config.plot_y_auto_scale
+            self._y_min = self.config.plot_y_min
+            self._y_max = self.config.plot_y_max
+            
+            # Apply to UI
+            self.plot_widget.showGrid(x=True, y=True, alpha=self._grid_alpha)
+            if self._y_auto_scale:
+                self.plot_widget.enableAutoRange(axis='y')
+            else:
+                self.plot_widget.disableAutoRange(axis='y')
+                self.plot_widget.setYRange(self._y_min, self._y_max, padding=0)
+            
+            self.set_time_window_index(self.config.plot_time_window_index)
+            
+            # Force legend sync
+            if self._show_legend:
+                if not getattr(self, 'legend', None):
+                    self.legend = self.plot_widget.addLegend(offset=(-10, 10))
+            else:
+                if getattr(self, 'legend', None):
+                    self.plot_widget.removeItem(self.legend)
+                    self.legend = None
+
+    def _show_options(self) -> None:
+        """Override to filter visible registers and variables in the dialog."""
+        if not self.config:
+            return super()._show_options()
+            
+        # Filter registers: exclude if R<addr> is in hidden_registers
+        # (Viewer logic uses designator fragment "R<addr>" for register visibility)
+        visible_regs = [r for r in self.registers if f"R{r.address}" not in self.config.hidden_registers]
+        
+        # Filter variables: exclude if name is in hidden_variables
+        visible_vars = [v for v in self.variables if v.name not in self.config.hidden_variables]
+        
+        # Use filtered lists for the dialog
+        from src.ui.plot_options_dialog import PlotOptionsDialog
+        dialog = PlotOptionsDialog(
+            line_width=self._line_width,
+            grid_alpha=self._grid_alpha,
+            show_legend=self._show_legend,
+            time_window_index=self.time_combo.currentIndex(),
+            y_auto_scale=self._y_auto_scale,
+            y_min=self._y_min,
+            y_max=self._y_max,
+            registers=visible_regs,
+            variables=visible_vars,
+            selected_registers=self.get_selected_registers(),
+            selected_variables=self.get_selected_variables(),
+            parent=self
+        )
+        
+        if dialog.exec():
+            options = dialog.get_options()
+            self._line_width = options['line_width']
+            self._grid_alpha = options['grid_alpha']
+            self._show_legend = options['show_legend']
+            self._y_auto_scale = options['y_auto_scale']
+            self._y_min = options['y_min']
+            self._y_max = options['y_max']
+            
+            # Update time window
+            time_window_index = options['time_window_index']
+            if 0 <= time_window_index < self.time_combo.count():
+                self.time_combo.setCurrentIndex(time_window_index)
+                self._on_time_window_changed(time_window_index)
+            
+            # Update selected registers and variables
+            self.set_selected_registers(options['selected_registers'])
+            self.set_selected_variables(options['selected_variables'])
+            
+            # Save to config
+            self.config.plot_line_width = self._line_width
+            self.config.plot_grid_alpha = self._grid_alpha
+            self.config.plot_show_legend = self._show_legend
+            self.config.plot_y_auto_scale = self._y_auto_scale
+            self.config.plot_y_min = self._y_min
+            self.config.plot_y_max = self._y_max
+            self.config.plot_time_window_index = self.time_combo.currentIndex()
+            self.config.plot_registers = options['selected_registers']
+            self.config.plot_variables = options['selected_variables']
+            self.config.save()
+            
+            # Apply options
+            self.plot_widget.showGrid(x=True, y=True, alpha=self._grid_alpha)
+            
+            # Apply Y axis scaling
+            if self._y_auto_scale:
+                self.plot_widget.enableAutoRange(axis='y')
+            else:
+                self.plot_widget.disableAutoRange(axis='y')
+                self.plot_widget.setYRange(self._y_min, self._y_max, padding=0)
+            
+            if self._show_legend:
+                if not self.legend:
+                    self.legend = self.plot_widget.addLegend(offset=(-10, 10))
+            else:
+                if self.legend:
+                    self.plot_widget.removeItem(self.legend)
+                    self.legend = None
+            
+            # Update existing plot items with new line width
+            for plot_item in self._plot_items.values():
+                pen = plot_item.opts['pen']
+                new_pen = pg.mkPen(
+                    color=pen.color(),
+                    width=self._line_width,
+                    style=pen.style()
+                )
+                plot_item.setPen(new_pen)
+
+    def set_registers(self, registers: list) -> None:
+        """Override to restore selection from config."""
+        super().set_registers(registers)
+        if hasattr(self, 'config') and self.config:
+            # Restore selection for visible registers
+            self.set_selected_registers(self.config.plot_registers)
+
+    def set_variables(self, variables: list) -> None:
+        """Override to restore selection from config."""
+        super().set_variables(variables)
+        if hasattr(self, 'config') and self.config:
+            # Restore selection for visible variables
+            self.set_selected_variables(self.config.plot_variables)
 
 class ViewerVariablesPanel(VariablesPanel):
     """Modified VariablesPanel for the viewer with visibility controls."""
@@ -273,6 +405,7 @@ class ViewerVariablesPanel(VariablesPanel):
 
     def _setup_ui(self) -> None:
         """Setup the panel UI without the toolbar."""
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -294,6 +427,7 @@ class ViewerVariablesPanel(VariablesPanel):
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_menu)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         
         return table
 
@@ -457,6 +591,7 @@ class ViewerBitsPanel(BitsPanel):
 
     def _setup_ui(self) -> None:
         """Setup the panel UI without the toolbar."""
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -479,6 +614,7 @@ class ViewerBitsPanel(BitsPanel):
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_menu)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         
         table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         
@@ -689,6 +825,300 @@ class ViewerBitsPanel(BitsPanel):
                         new_value_label.setText("")
                         new_value_label.setStyleSheet("background-color: #eeeeee; border: none;")
 
+class TextEditDialog(QDialog):
+    """Integrated dialog for editing text properties in real-time."""
+    def __init__(self, target_label, parent=None):
+        super().__init__(parent)
+        self.target_label = target_label
+        self.setWindowTitle("Edit Text")
+        self.setMinimumWidth(450)
+        
+        # Store original state for cancel
+        self.original_text = target_label.text()
+        self.original_font = target_label.font()
+        self.original_color = target_label.palette().color(target_label.foregroundRole())
+        self.original_align = target_label.alignment()
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        
+        # Text Input
+        layout.addWidget(QLabel("Text Content:"))
+        self.text_input = QLineEdit(self.original_text)
+        self.text_input.textChanged.connect(self._update_style)
+        layout.addWidget(self.text_input)
+        
+        # Font Options
+        font_box = QHBoxLayout()
+        
+        v_font = QVBoxLayout()
+        v_font.addWidget(QLabel("Font Family:"))
+        self.font_combo = QFontComboBox()
+        self.font_combo.setCurrentFont(self.original_font)
+        self.font_combo.currentFontChanged.connect(self._update_style)
+        v_font.addWidget(self.font_combo)
+        font_box.addLayout(v_font, 3)
+        
+        v_size = QVBoxLayout()
+        v_size.addWidget(QLabel("Size:"))
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(1, 200)
+        # Use a reasonable default if pointSize is invalid (-1)
+        curr_size = self.original_font.pointSize()
+        self.size_spin.setValue(curr_size if curr_size > 0 else 14)
+        self.size_spin.valueChanged.connect(self._update_style)
+        v_size.addWidget(self.size_spin)
+        font_box.addLayout(v_size, 1)
+        
+        # Bold/Italic
+        v_style = QVBoxLayout()
+        v_style.addWidget(QLabel("Style:"))
+        self.bold_check = QCheckBox("Bold")
+        self.bold_check.setChecked(self.original_font.bold())
+        self.bold_check.stateChanged.connect(self._update_style)
+        self.italic_check = QCheckBox("Italic")
+        self.italic_check.setChecked(self.original_font.italic())
+        self.italic_check.stateChanged.connect(self._update_style)
+        v_style.addWidget(self.bold_check)
+        v_style.addWidget(self.italic_check)
+        font_box.addLayout(v_style)
+        
+        # Alignment Option
+        v_align = QVBoxLayout()
+        v_align.addWidget(QLabel("Alignment:"))
+        self.align_combo = QComboBox()
+        self.align_combo.addItems(["Left", "Center", "Right"])
+        
+        # Map current alignment to index
+        if self.original_align & Qt.AlignmentFlag.AlignLeft:
+            self.align_combo.setCurrentIndex(0)
+        elif self.original_align & Qt.AlignmentFlag.AlignRight:
+            self.align_combo.setCurrentIndex(2)
+        else: # Default to center
+            self.align_combo.setCurrentIndex(1)
+            
+        self.align_combo.currentIndexChanged.connect(self._update_style)
+        v_align.addWidget(self.align_combo)
+        font_box.addLayout(v_align)
+        
+        layout.addLayout(font_box)
+        
+        # Color Picker (Embedded)
+        layout.addWidget(QLabel("Color:"))
+        self.color_picker = QColorDialog()
+        self.color_picker.setOptions(QColorDialog.ColorDialogOption.DontUseNativeDialog | QColorDialog.ColorDialogOption.NoButtons)
+        self.color_picker.setCurrentColor(self.original_color)
+        self.color_picker.currentColorChanged.connect(self._update_style)
+        layout.addWidget(self.color_picker)
+        
+        # Actions
+        actions = QHBoxLayout()
+        ok_btn = QPushButton("Apply")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        actions.addStretch()
+        actions.addWidget(ok_btn)
+        actions.addWidget(cancel_btn)
+        layout.addLayout(actions)
+
+    def _update_style(self):
+        """Apply all style properties via a single stylesheet for maximum reliability."""
+        text = self.text_input.text() if self.text_input.text() else "Text"
+        font_family = self.font_combo.currentFont().family()
+        font_size = self.size_spin.value()
+        is_bold = self.bold_check.isChecked()
+        is_italic = self.italic_check.isChecked()
+        color = self.color_picker.currentColor().name()
+        
+        style = f"""
+            QLabel {{
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                font-weight: {"bold" if is_bold else "normal"};
+                font-style: {"italic" if is_italic else "normal"};
+                color: {color};
+                padding: 10px;
+                background: transparent;
+            }}
+        """
+        self.target_label.setStyleSheet(style)
+        self.target_label.setText(text)
+        
+        # Apply alignment
+        align_text = self.align_combo.currentText()
+        if align_text == "Left":
+            self.target_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        elif align_text == "Right":
+            self.target_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            self.target_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def reject(self):
+        """Restore original settings."""
+        # Calculate original values for the stylesheet
+        font = self.original_font
+        font_family = font.family()
+        # Handle cases where pointSize is -1
+        font_size = font.pointSize()
+        if font_size <= 0:
+            font_size = font.pixelSize() // 1.33 # Rough conversion if needed
+            if font_size <= 0: font_size = 14
+            
+        style = f"""
+            QLabel {{
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                font-weight: {"bold" if font.bold() else "normal"};
+                font-style: {"italic" if font.italic() else "normal"};
+                color: {self.original_color.name()};
+                padding: 10px;
+                background: transparent;
+            }}
+        """
+        self.target_label.setStyleSheet(style)
+        self.target_label.setText(self.original_text)
+        self.target_label.setAlignment(self.original_align)
+        super().reject()
+
+class ViewerTextPanel(QWidget):
+    """Simple panel for displaying text."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_admin = False
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        
+        self.display_label = QLabel("Text")
+        self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.display_label.setWordWrap(True)
+        # Default starting style
+        self.display_label.setStyleSheet("font-size: 14pt; padding: 10px; background: transparent;")
+        self.layout.addWidget(self.display_label, 1)
+
+    def set_admin_mode(self, is_admin: bool, config=None):
+        self.is_admin = is_admin
+
+    def get_settings(self):
+        """Get current text and style as a dictionary."""
+        color = self.display_label.palette().color(self.display_label.foregroundRole())
+        if "color:" in self.display_label.styleSheet():
+            import re
+            match = re.search(r"color:\s*(#[0-9a-fA-F]+)", self.display_label.styleSheet())
+            if match:
+                color = QColor(match.group(1))
+
+        return {
+            "text": self.display_label.text(),
+            "font_family": self.display_label.font().family(),
+            "font_size": self.display_label.font().pointSize(),
+            "bold": self.display_label.font().bold(),
+            "italic": self.display_label.font().italic(),
+            "color": color.name(),
+            "alignment": int(self.display_label.alignment())
+        }
+
+    def set_settings(self, settings):
+        """Apply settings from a dictionary."""
+        text = settings.get("text", "Text")
+        font_family = settings.get("font_family", "Segoe UI")
+        font_size = settings.get("font_size", 14)
+        is_bold = settings.get("bold", False)
+        is_italic = settings.get("italic", False)
+        color = settings.get("color", "#000000")
+        alignment = settings.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
+
+        style = f"""
+            QLabel {{
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                font-weight: {"bold" if is_bold else "normal"};
+                font-style: {"italic" if is_italic else "normal"};
+                color: {color};
+                padding: 10px;
+                background: transparent;
+            }}
+        """
+        self.display_label.setStyleSheet(style)
+        self.display_label.setText(text)
+        self.display_label.setAlignment(Qt.Alignment(alignment))
+
+    def mouseDoubleClickEvent(self, event):
+        if not self.is_admin:
+            return super().mouseDoubleClickEvent(event)
+            
+        dialog = TextEditDialog(self.display_label, self)
+        if not dialog.exec():
+            # Restoration is handled by dialog.reject()
+            pass
+
+class ViewerImagePanel(QWidget):
+    """Simple panel for displaying an image."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_admin = False
+        self._pixmap = None
+        self._image_path = ""
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        
+        self.image_label = QLabel("Double-click to insert image (Admin)")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.image_label.setMinimumSize(10, 10) # Allow shrinking
+        self.layout.addWidget(self.image_label, 1)
+
+    def set_admin_mode(self, is_admin: bool, config=None):
+        self.is_admin = is_admin
+        if not self.is_admin and self.image_label.text() == "Double-click to insert image (Admin)":
+            self.image_label.setText("No Image")
+
+    def mouseDoubleClickEvent(self, event):
+        if not self.is_admin:
+            return super().mouseDoubleClickEvent(event)
+        self._upload_image()
+
+    def _upload_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+        if path:
+            self.load_image(path)
+
+    def load_image(self, path):
+        """Public method to load image from path."""
+        if os.path.exists(path):
+            self._image_path = path
+            self._pixmap = QPixmap(path)
+            self.image_label.setText("")
+            self._update_image_display()
+        else:
+            self.image_label.setText("Image Not Found")
+
+    def _update_image_display(self):
+        if self._pixmap and not self._pixmap.isNull():
+            # Scale to fit while keeping aspect ratio
+            label_size = self.image_label.size()
+            if label_size.width() > 0 and label_size.height() > 0:
+                scaled = self._pixmap.scaled(
+                    label_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.image_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_image_display()
+
+
 class MinimalScanDialog(QDialog):
     """A minimal dialog with just a progress bar for scanning."""
     devices_found = Signal(list)
@@ -764,3 +1194,94 @@ class MinimalScanDialog(QDialog):
             self.worker.cancel()
             self.worker.wait()
         super().closeEvent(event)
+class ConnectionPanel(QWidget):
+    """Integrated panel for connection controls."""
+    refresh_ports = Signal()
+    perform_scan = Signal()
+    toggle_connection = Signal(bool)
+    device_menu_hide = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 5, 10, 5)
+        self.layout.setSpacing(10)
+        
+        # Port Selection Area
+        self.port_combo = QComboBox()
+        self.port_combo.setMinimumWidth(150)
+        self.port_combo.setFixedHeight(32)
+        self.layout.addWidget(self.port_combo)
+        
+        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn.setFixedSize(32, 32)
+        self.refresh_btn.setToolTip("Refresh Serial Ports")
+        self.refresh_btn.clicked.connect(self.refresh_ports.emit)
+        self.layout.addWidget(self.refresh_btn)
+        
+        self.layout.addSpacing(10)
+        
+        # Scan Button
+        self.scan_btn = QPushButton("Scan")
+        self.scan_btn.setFixedHeight(32)
+        self.scan_btn.setToolTip("Scan for Modbus devices")
+        self.scan_btn.clicked.connect(self.perform_scan.emit)
+        self.layout.addWidget(self.scan_btn)
+        
+        self.layout.addSpacing(10)
+        
+        # Device Selection Button
+        self.device_btn = QToolButton()
+        self.device_btn.setText("Select Devices")
+        self.device_btn.setMinimumWidth(150)
+        self.device_btn.setFixedHeight(32)
+        self.device_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.device_btn.setToolTip("Select devices to connect to")
+        self.device_btn.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.device_menu = QMenu(self)
+        self.device_btn.setMenu(self.device_menu)
+        self.device_menu.aboutToHide.connect(self.device_menu_hide.emit)
+        self.layout.addWidget(self.device_btn)
+        
+        self.layout.addSpacing(10)
+        
+        # Connect Button
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setCheckable(True)
+        self.connect_btn.setFixedHeight(32)
+        self.connect_btn.setMinimumWidth(100)
+        self.connect_btn.toggled.connect(self._on_connect_toggled)
+        self.layout.addWidget(self.connect_btn)
+        
+        self.layout.addStretch()
+    
+    def _on_connect_toggled(self, checked: bool):
+        """Handle connect button toggle and update appearance."""
+        if checked:
+            self.connect_btn.setText("Disconnect")
+            self.connect_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1976d2;
+                    color: white;
+                    border: 1px solid #1976d2;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #1565c0;
+                }
+            """)
+        else:
+            self.connect_btn.setText("Connect")
+            self.connect_btn.setStyleSheet("")
+        
+        # Emit the signal with the checked state
+        self.toggle_connection.emit(checked)
+
+    def set_admin_mode(self, is_admin: bool, config=None):
+        # Admin can access everything, users might have restricted view
+        # For now, it's the same for both
+        pass

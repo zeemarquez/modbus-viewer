@@ -39,8 +39,8 @@ class PlotOptionsDialog(QDialog):
         self.selected_registers = selected_registers or []  # Now list of designators
         self.selected_variables = selected_variables or []
         
-        self._register_checkboxes: Dict[str, QCheckBox] = {}  # designator -> checkbox
-        self._variable_checkboxes: Dict[str, QCheckBox] = {}
+        self._register_checkbox_map: Dict[tuple, QCheckBox] = {}  # (address, label) -> checkbox
+        self._variable_checkbox_map: Dict[str, QCheckBox] = {}   # name -> checkbox
         
         self.setWindowTitle("Plot Options")
         self.setMinimumSize(700, 500)
@@ -155,9 +155,21 @@ class PlotOptionsDialog(QDialog):
         reg_title.setStyleSheet("font-size: 11px; font-weight: 500;")
         reg_section.addWidget(reg_title)
         
-        self.reg_tabs = QTabWidget()
-        self.reg_tabs.setMinimumHeight(200)
-        reg_section.addWidget(self.reg_tabs, stretch=1)
+        self.reg_scroll = QScrollArea()
+        self.reg_scroll.setWidgetResizable(True)
+        self.reg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.reg_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.reg_scroll.setStyleSheet("border: 1px solid #e0e0e0; border-radius: 4px; background: #ffffff;")
+        self.reg_scroll.setMinimumHeight(200)
+        
+        self.reg_container = QWidget()
+        self.reg_container.setStyleSheet("background: transparent;")
+        self.reg_layout = QVBoxLayout(self.reg_container)
+        self.reg_layout.setContentsMargins(8, 8, 8, 8)
+        self.reg_layout.setSpacing(4)
+        
+        self.reg_scroll.setWidget(self.reg_container)
+        reg_section.addWidget(self.reg_scroll, stretch=1)
         
         # Register buttons
         reg_btn_layout = QHBoxLayout()
@@ -240,79 +252,78 @@ class PlotOptionsDialog(QDialog):
     
     def _populate_checkboxes(self) -> None:
         """Populate register and variable checkboxes."""
-        # Clear existing register tabs
-        self.reg_tabs.clear()
-        self._register_checkboxes.clear()
+        # Clear existing register checkboxes
+        for i in reversed(range(self.reg_layout.count())):
+            self.reg_layout.itemAt(i).widget().setParent(None)
+        self._register_checkbox_map.clear()
         
         # Clear existing variable checkboxes
-        for checkbox in self._variable_checkboxes.values():
-            checkbox.deleteLater()
-        self._variable_checkboxes.clear()
+        for i in reversed(range(self.variable_layout.count())):
+            self.variable_layout.itemAt(i).widget().setParent(None)
+        self._variable_checkbox_map.clear()
         
-        # Group registers by device
-        by_device: Dict[int, List[Register]] = {}
+        # Group registers by (address, label) to show them uniquely
+        unique_regs = {}
         for reg in self.registers:
-            if reg.slave_id not in by_device:
-                by_device[reg.slave_id] = []
-            by_device[reg.slave_id].append(reg)
-        
-        # Create register checkboxes in tabs grouped by device
-        for slave_id in sorted(by_device.keys()):
-            # Create tab content
-            tab_widget = QWidget()
-            tab_layout = QVBoxLayout(tab_widget)
-            tab_layout.setContentsMargins(8, 8, 8, 8)
-            tab_layout.setSpacing(4)
-            tab_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            key = (reg.address, reg.label)
+            if key not in unique_regs:
+                unique_regs[key] = []
+            unique_regs[key].append(reg)
             
-            # Add to scroll area for this tab
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            scroll.setWidget(tab_widget)
+        for key in sorted(unique_regs.keys()):
+            address, label = key
+            display_label = label if label else f"R{address}"
             
-            for reg in by_device[slave_id]:
-                label = reg.label if reg.label else f"R{reg.address}"
-                checkbox = QCheckBox(label)
-                checkbox.setStyleSheet("font-size: 11px;")
-                checkbox.setToolTip(reg.designator)
-                checkbox.setChecked(reg.designator in self.selected_registers)
-                tab_layout.addWidget(checkbox)
-                self._register_checkboxes[reg.designator] = checkbox
-            
-            self.reg_tabs.addTab(scroll, f"Device {slave_id}")
-        
-        # Create variable checkboxes
-        for var in self.variables:
-            label = var.label or var.name
-            if not var.is_global and var.slave_id:
-                label = f"D{var.slave_id}.{label}"
-            
-            checkbox = QCheckBox(label)
+            checkbox = QCheckBox(display_label)
             checkbox.setStyleSheet("font-size: 11px;")
-            checkbox.setToolTip(var.designator)
-            checkbox.setChecked(var.designator in self.selected_variables)
+            
+            # Check if any instance of this register is currently selected
+            is_selected = any(r.designator in self.selected_registers for r in unique_regs[key])
+            checkbox.setChecked(is_selected)
+            
+            self.reg_layout.addWidget(checkbox)
+            self._register_checkbox_map[key] = checkbox
+            
+        # Group variables by name
+        unique_vars = {}
+        for var in self.variables:
+            if var.name not in unique_vars:
+                unique_vars[var.name] = []
+            unique_vars[var.name].append(var)
+            
+        for name in sorted(unique_vars.keys()):
+            # Use label if available for display
+            var_instance = unique_vars[name][0]
+            display_label = var_instance.label if var_instance.label else name
+            
+            checkbox = QCheckBox(display_label)
+            checkbox.setStyleSheet("font-size: 11px;")
+            
+            is_selected = any(v.designator in self.selected_variables for v in unique_vars[name])
+            checkbox.setChecked(is_selected)
+            
             self.variable_layout.addWidget(checkbox)
-            self._variable_checkboxes[var.designator] = checkbox
+            self._variable_checkbox_map[name] = checkbox
+        
     
     def _select_all_registers(self) -> None:
         """Select all register checkboxes."""
-        for checkbox in self._register_checkboxes.values():
+        for checkbox in self._register_checkbox_map.values():
             checkbox.setChecked(True)
     
     def _select_none_registers(self) -> None:
         """Deselect all register checkboxes."""
-        for checkbox in self._register_checkboxes.values():
+        for checkbox in self._register_checkbox_map.values():
             checkbox.setChecked(False)
     
     def _select_all_variables(self) -> None:
         """Select all variable checkboxes."""
-        for checkbox in self._variable_checkboxes.values():
+        for checkbox in self._variable_checkbox_map.values():
             checkbox.setChecked(True)
     
     def _select_none_variables(self) -> None:
         """Deselect all variable checkboxes."""
-        for checkbox in self._variable_checkboxes.values():
+        for checkbox in self._variable_checkbox_map.values():
             checkbox.setChecked(False)
     
     def _on_auto_scale_toggled(self, checked: bool) -> None:
@@ -322,14 +333,22 @@ class PlotOptionsDialog(QDialog):
     
     def get_options(self) -> dict:
         """Get the selected options."""
-        selected_registers = [
-            designator for designator, checkbox in self._register_checkboxes.items()
-            if checkbox.isChecked()
-        ]
-        selected_variables = [
-            designator for designator, checkbox in self._variable_checkboxes.items()
-            if checkbox.isChecked()
-        ]
+        selected_registers = []
+        for key, checkbox in self._register_checkbox_map.items():
+            if checkbox.isChecked():
+                address, label = key
+                # Include all designators that match this address and label
+                for reg in self.registers:
+                    if reg.address == address and reg.label == label:
+                        selected_registers.append(reg.designator)
+                        
+        selected_variables = []
+        for name, checkbox in self._variable_checkbox_map.items():
+            if checkbox.isChecked():
+                # Include all designators that match this name
+                for var in self.variables:
+                    if var.name == name:
+                        selected_variables.append(var.designator)
         
         return {
             'line_width': self.line_width_spin.value(),
@@ -339,6 +358,6 @@ class PlotOptionsDialog(QDialog):
             'y_auto_scale': self.y_auto_scale_check.isChecked(),
             'y_min': self.y_min_spin.value(),
             'y_max': self.y_max_spin.value(),
-            'selected_registers': selected_registers,  # Now list of designators
-            'selected_variables': selected_variables,
+            'selected_registers': list(set(selected_registers)),
+            'selected_variables': list(set(selected_variables)),
         }

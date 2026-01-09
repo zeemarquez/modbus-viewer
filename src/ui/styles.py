@@ -549,6 +549,33 @@ QScrollArea > QWidget > QWidget {
 QDialogButtonBox QPushButton {
     min-width: 70px;
 }
+
+/* Tab Widget */
+QTabWidget::pane {
+    border: none;
+    background-color: transparent;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #757575;
+    padding: 8px 16px;
+    margin-right: 4px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 12px;
+}
+
+QTabBar::tab:selected {
+    color: #1976d2;
+    border-bottom: 2px solid #1976d2;
+    font-weight: 600;
+}
+
+QTabBar::tab:hover:!selected {
+    color: #212121;
+    background-color: #f5f5f5;
+}
 """
 
 

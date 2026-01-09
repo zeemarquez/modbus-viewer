@@ -36,6 +36,21 @@ class ViewerConfig:
     scan_timeout: float = 0.1
     scan_slave_limit: int = 100
     
+    # Plot settings
+    plot_registers: List[str] = field(default_factory=list)
+    plot_variables: List[str] = field(default_factory=list)
+    plot_line_width: float = 2.0
+    plot_grid_alpha: float = 0.1
+    plot_show_legend: bool = True
+    plot_time_window_index: int = 4
+    plot_y_auto_scale: bool = True
+    plot_y_min: float = 0.0
+    plot_y_max: float = 100.0
+    
+    # Custom Panels
+    text_panels: List[dict] = field(default_factory=list)
+    image_panels: List[dict] = field(default_factory=list)
+    
     def to_dict(self) -> dict:
         return {
             "admin_password": self.admin_password,
@@ -56,6 +71,17 @@ class ViewerConfig:
             "scan_slave_limit": self.scan_slave_limit,
             "layout_state": self.layout_state,
             "geometry": self.geometry,
+            "plot_registers": self.plot_registers,
+            "plot_variables": self.plot_variables,
+            "plot_line_width": self.plot_line_width,
+            "plot_grid_alpha": self.plot_grid_alpha,
+            "plot_show_legend": self.plot_show_legend,
+            "plot_time_window_index": self.plot_time_window_index,
+            "plot_y_auto_scale": self.plot_y_auto_scale,
+            "plot_y_min": self.plot_y_min,
+            "plot_y_max": self.plot_y_max,
+            "text_panels": self.text_panels,
+            "image_panels": self.image_panels,
         }
     
     @classmethod
@@ -79,6 +105,17 @@ class ViewerConfig:
             scan_slave_limit=data.get("scan_slave_limit", 100),
             layout_state=data.get("layout_state"),
             geometry=data.get("geometry"),
+            plot_registers=data.get("plot_registers", []),
+            plot_variables=data.get("plot_variables", []),
+            plot_line_width=data.get("plot_line_width", 2.0),
+            plot_grid_alpha=data.get("plot_grid_alpha", 0.1),
+            plot_show_legend=data.get("plot_show_legend", True),
+            plot_time_window_index=data.get("plot_time_window_index", 4),
+            plot_y_auto_scale=data.get("plot_y_auto_scale", True),
+            plot_y_min=data.get("plot_y_min", 0.0),
+            plot_y_max=data.get("plot_y_max", 100.0),
+            text_panels=data.get("text_panels", []),
+            image_panels=data.get("image_panels", []),
         )
     
     def save(self, path: str = "viewer_config.json") -> None:

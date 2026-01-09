@@ -78,11 +78,11 @@ class PlotView(QFrame):
         toolbar.setContentsMargins(4, 4, 4, 4)
         
         # Time window selector (left side)
-        toolbar.addWidget(QLabel("Time:"))
         self.time_combo = QComboBox()
         self.time_combo.addItems(["1s", "5s", "10s", "30s", "1min", "2min", "5min"])
         self.time_combo.setCurrentIndex(4)  # 1min default
         self.time_combo.setFixedWidth(70)
+        self.time_combo.setFixedHeight(32)
         self.time_combo.currentIndexChanged.connect(self._on_time_window_changed)
         toolbar.addWidget(self.time_combo)
         
@@ -90,22 +90,26 @@ class PlotView(QFrame):
         
         self.pause_btn = QPushButton("Pause")
         self.pause_btn.setFixedWidth(60)
+        self.pause_btn.setFixedHeight(32)
         self.pause_btn.setCheckable(True)
         self.pause_btn.toggled.connect(self._on_pause_toggled)
         toolbar.addWidget(self.pause_btn)
         
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setFixedWidth(50)
+        self.clear_btn.setFixedHeight(32)
         self.clear_btn.clicked.connect(self.clear)
         toolbar.addWidget(self.clear_btn)
         
         self.options_btn = QPushButton("Options")
         self.options_btn.setFixedWidth(60)
+        self.options_btn.setFixedHeight(32)
         self.options_btn.clicked.connect(self._show_options)
         toolbar.addWidget(self.options_btn)
         
         self.maximize_btn = QPushButton("🗖")
         self.maximize_btn.setFixedWidth(30)
+        self.maximize_btn.setFixedHeight(32)
         self.maximize_btn.setToolTip("Maximize plot to independent window")
         self.maximize_btn.clicked.connect(self.maximize_requested.emit)
         toolbar.addWidget(self.maximize_btn)
