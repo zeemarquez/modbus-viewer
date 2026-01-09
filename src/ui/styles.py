@@ -1,5 +1,5 @@
 """
-Light theme styling for the application.
+Application styling with theme support.
 """
 
 from PySide6.QtWidgets import QApplication, QSpinBox, QDoubleSpinBox, QAbstractSpinBox
@@ -7,45 +7,90 @@ from PySide6.QtGui import QPalette, QColor
 from PySide6.QtCore import Qt, QObject, QEvent
 
 
-# Color palette - Clean light theme
-COLORS = {
+# Light Theme Colors
+LIGHT_COLORS = {
     'bg_primary': '#ffffff',
     'bg_secondary': '#f5f5f5',
     'bg_tertiary': '#eeeeee',
+    'bg_header': '#fafafa',
     'bg_widget': '#ffffff',
-    'accent': '#1976d2',
-    'accent_hover': '#1565c0',
-    'accent_light': '#e3f2fd',
+    
     'text_primary': '#212121',
     'text_secondary': '#757575',
     'text_disabled': '#bdbdbd',
+    'text_inverse': '#ffffff',
+    
     'border': '#e0e0e0',
     'border_dark': '#bdbdbd',
+    
+    'accent': '#1976d2',
+    'accent_hover': '#1565c0',
+    'accent_light': '#e3f2fd',
+    
     'success': '#2e7d32',
     'warning': '#f57c00',
     'error': '#c62828',
     'highlight': '#1976d2',
+    
+    'tooltip_bg': '#424242',
+    'tooltip_text': '#ffffff',
+    'selection_bg': '#e3f2fd',
+    'selection_text': '#212121',
 }
 
+# Dark Theme Colors
+DARK_COLORS = {
+    'bg_primary': '#1e1e1e',
+    'bg_secondary': '#252526',
+    'bg_tertiary': '#2d2d2d',
+    'bg_header': '#252526',
+    'bg_widget': '#333333',
+    
+    'text_primary': '#d4d4d4',
+    'text_secondary': '#a0a0a0',
+    'text_disabled': '#606060',
+    'text_inverse': '#1e1e1e',
+    
+    'border': '#3e3e42',
+    'border_dark': '#505050',
+    
+    'accent': '#007acc',
+    'accent_hover': '#0098ff',
+    'accent_light': '#264f78',
+    
+    'success': '#4ec9b0',
+    'warning': '#cca700',
+    'error': '#f44747',
+    'highlight': '#007acc',
+    
+    'tooltip_bg': '#252526',
+    'tooltip_text': '#d4d4d4',
+    'selection_bg': '#264f78',
+    'selection_text': '#ffffff',
+}
 
-STYLESHEET = """
+# Provide a default COLORS dict for imports that might use it directly (backward compat)
+COLORS = LIGHT_COLORS.copy()
+
+
+THEME_TEMPLATE = """
 /* Main window */
 QMainWindow, QDialog {
-    background-color: #f5f5f5;
-    color: #212121;
+    background-color: %(bg_secondary)s;
+    color: %(text_primary)s;
 }
 
 QWidget {
-    color: #212121;
+    color: %(text_primary)s;
     font-family: 'Segoe UI', sans-serif;
     font-size: 12px;
 }
 
 /* Menu bar */
 QMenuBar {
-    background-color: #ffffff;
-    color: #212121;
-    border-bottom: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    color: %(text_primary)s;
+    border-bottom: 1px solid %(border)s;
     padding: 2px 0;
 }
 
@@ -55,74 +100,75 @@ QMenuBar::item {
 }
 
 QMenuBar::item:selected {
-    background-color: #eeeeee;
+    background-color: %(bg_tertiary)s;
 }
 
 QMenu {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     padding: 4px 0;
 }
 
 QMenu::item {
     padding: 6px 24px;
+    color: %(text_primary)s;
 }
 
 QMenu::item:selected {
-    background-color: #1976d2;
-    color: #ffffff;
+    background-color: %(accent)s;
+    color: %(text_inverse)s;
 }
 
 QMenu::separator {
     height: 1px;
-    background: #e0e0e0;
+    background: %(border)s;
     margin: 4px 0;
 }
 
 /* Toolbar */
 QToolBar {
-    background-color: #ffffff;
+    background-color: %(bg_primary)s;
     border: none;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid %(border)s;
     padding: 4px 8px;
     spacing: 6px;
 }
 
 QToolBar::separator {
     width: 1px;
-    background: #e0e0e0;
+    background: %(border)s;
     margin: 4px 6px;
 }
 
 QToolButton {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     padding: 6px 12px;
-    color: #212121;
+    color: %(text_primary)s;
     font-weight: 500;
 }
 
 QToolButton:hover {
-    background-color: #f5f5f5;
-    border-color: #bdbdbd;
+    background-color: %(bg_secondary)s;
+    border-color: %(border_dark)s;
 }
 
 QToolButton:pressed {
-    background-color: #eeeeee;
+    background-color: %(bg_tertiary)s;
 }
 
 QToolButton:checked {
-    background-color: #1976d2;
-    border-color: #1976d2;
-    color: #ffffff;
+    background-color: %(accent)s;
+    border-color: %(accent)s;
+    color: %(text_inverse)s;
 }
 
 /* Status bar */
 QStatusBar {
-    background-color: #ffffff;
-    color: #757575;
-    border-top: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    color: %(text_secondary)s;
+    border-top: 1px solid %(border)s;
     padding: 2px 8px;
     font-size: 11px;
 }
@@ -133,16 +179,17 @@ QStatusBar::item {
 
 /* Dock widgets */
 QDockWidget {
-    color: #212121;
+    color: %(text_primary)s;
     font-weight: 500;
     font-size: 12px;
 }
 
 QDockWidget::title {
-    background-color: #fafafa;
+    background-color: %(bg_header)s;
     padding: 6px 8px;
-    border: 1px solid #e0e0e0;
+    border: 1px solid %(border)s;
     text-align: left;
+    color: %(text_primary)s;
 }
 
 QDockWidget::close-button, QDockWidget::float-button {
@@ -152,16 +199,14 @@ QDockWidget::close-button, QDockWidget::float-button {
 }
 
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
-    background-color: #eeeeee;
+    background-color: %(bg_tertiary)s;
     border-radius: 3px;
 }
 
-/* Panel borders are set directly in Python code */
-
 /* Group box */
 QGroupBox {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     margin-top: 12px;
     padding: 12px;
@@ -174,16 +219,17 @@ QGroupBox::title {
     subcontrol-position: top left;
     left: 8px;
     padding: 0 4px;
-    color: #1976d2;
+    color: %(accent)s;
     font-weight: 500;
     font-size: 11px;
+    background-color: %(bg_primary)s; 
 }
 
 /* Buttons */
 QPushButton {
-    background-color: #ffffff;
-    color: #212121;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    color: %(text_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     padding: 5px 12px;
     font-size: 11px;
@@ -192,92 +238,90 @@ QPushButton {
 }
 
 QPushButton:hover {
-    background-color: #f5f5f5;
-    border-color: #bdbdbd;
+    background-color: %(bg_secondary)s;
+    border-color: %(border_dark)s;
 }
 
 QPushButton:pressed {
-    background-color: #eeeeee;
+    background-color: %(bg_tertiary)s;
 }
 
 QPushButton:disabled {
-    background-color: #fafafa;
-    color: #bdbdbd;
-    border-color: #eeeeee;
+    background-color: %(bg_header)s;
+    color: %(text_disabled)s;
+    border-color: %(border)s;
 }
 
 QPushButton#primary {
-    background-color: #1976d2;
-    border-color: #1976d2;
-    color: #ffffff;
+    background-color: %(accent)s;
+    border-color: %(accent)s;
+    color: %(text_inverse)s;
 }
 
 QPushButton#primary:hover {
-    background-color: #1565c0;
-    border-color: #1565c0;
+    background-color: %(accent_hover)s;
+    border-color: %(accent_hover)s;
 }
 
 /* Input fields */
 QLineEdit {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     padding: 6px 8px;
-    color: #212121;
-    selection-background-color: #1976d2;
-    selection-color: #ffffff;
+    color: %(text_primary)s;
+    selection-background-color: %(accent)s;
+    selection-color: %(text_inverse)s;
     font-size: 12px;
 }
 
 QLineEdit:focus {
-    border-color: #1976d2;
+    border-color: %(accent)s;
 }
 
 QLineEdit:disabled {
-    background-color: #fafafa;
-    color: #bdbdbd;
+    background-color: %(bg_header)s;
+    color: %(text_disabled)s;
 }
 
 /* Spinbox */
 QSpinBox, QDoubleSpinBox {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     padding: 6px 8px;
     padding-right: 20px;
-    color: #212121;
+    color: %(text_primary)s;
     font-size: 12px;
 }
 
 QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #1976d2;
+    border-color: %(accent)s;
 }
 
 QSpinBox:disabled, QDoubleSpinBox:disabled {
-    background-color: #fafafa;
-    color: #bdbdbd;
+    background-color: %(bg_header)s;
+    color: %(text_disabled)s;
 }
-
-/* Spinbox buttons removed - users can type values directly */
 
 /* Combo box */
 QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
     padding: 6px 8px;
     padding-right: 24px;
-    color: #212121;
+    color: %(text_primary)s;
     font-size: 12px;
     min-width: 80px;
 }
 
 QComboBox:hover {
-    border-color: #bdbdbd;
+    border-color: %(border_dark)s;
 }
 
 QComboBox:focus {
-    border-color: #1976d2;
+    border-color: %(accent)s;
 }
 
 QComboBox::drop-down {
@@ -290,15 +334,19 @@ QComboBox::drop-down {
 QComboBox::down-arrow {
     width: 10px;
     height: 10px;
+    /* We rely on system arrow or specific image, usually handled by OS style, but let's leave it default for simplicity or add color adjustment if possible. 
+       QComboBox uses standard OS primitives mostly. 
+    */
 }
 
 QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
-    selection-background-color: #1976d2;
-    selection-color: #ffffff;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
+    selection-background-color: %(accent)s;
+    selection-color: %(text_inverse)s;
     outline: none;
     padding: 4px 0;
+    color: %(text_primary)s;
 }
 
 QComboBox QAbstractItemView::item {
@@ -308,14 +356,15 @@ QComboBox QAbstractItemView::item {
 
 /* Tables */
 QTableWidget, QTableView {
-    background-color: #ffffff;
-    alternate-background-color: #fafafa;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    alternate-background-color: %(bg_header)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
-    gridline-color: #eeeeee;
-    selection-background-color: #e3f2fd;
-    selection-color: #212121;
+    gridline-color: %(bg_tertiary)s;
+    selection-background-color: %(selection_bg)s;
+    selection-color: %(selection_text)s;
     font-size: 13px;
+    color: %(text_primary)s;
 }
 
 QTableWidget::item, QTableView::item {
@@ -325,94 +374,88 @@ QTableWidget::item, QTableView::item {
 }
 
 QTableWidget::item:selected, QTableView::item:selected {
-    background-color: #e3f2fd;
-    color: #212121;
+    background-color: %(selection_bg)s;
+    color: %(selection_text)s;
 }
 
 QHeaderView::section {
-    background-color: #fafafa;
-    color: #757575;
+    background-color: %(bg_header)s;
+    color: %(text_secondary)s;
     padding: 8px;
     border: none;
-    border-right: 1px solid #eeeeee;
-    border-bottom: 1px solid #e0e0e0;
+    border-right: 1px solid %(bg_tertiary)s;
+    border-bottom: 1px solid %(border)s;
     font-weight: 600;
     font-size: 11px;
 }
 
 QHeaderView::section:hover {
-    background-color: #f5f5f5;
+    background-color: %(bg_secondary)s;
 }
 
 /* Widgets inside table cells */
 QTableWidget QLineEdit {
-    background-color: #ffffff;
-    border: 1px solid #1976d2;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(accent)s;
     border-radius: 0px;
     padding: 0px 4px;
-    color: #212121;
+    color: %(text_primary)s;
     margin: 0px;
     font-size: 13px;
     min-height: 32px;
 }
 
 QTableWidget QLineEdit:focus {
-    border-color: #1976d2;
+    border-color: %(accent)s;
 }
 
 QTableWidget QSpinBox, QTableWidget QDoubleSpinBox {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 2px;
     padding: 3px 6px;
     padding-right: 16px;
-    color: #212121;
+    color: %(text_primary)s;
     margin: 2px;
     font-size: 12px;
 }
 
-/* Spinbox buttons removed - users can type values directly */
-
 QTableWidget QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 2px;
     padding: 3px 6px;
     padding-right: 18px;
-    color: #212121;
+    color: %(text_primary)s;
     margin: 2px;
     font-size: 12px;
     min-width: 50px;
 }
 
-QTableWidget QComboBox::drop-down {
-    width: 16px;
-}
-
 QTableWidget QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
-    selection-background-color: #1976d2;
-    selection-color: #ffffff;
-    color: #212121;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
+    selection-background-color: %(accent)s;
+    selection-color: %(text_inverse)s;
+    color: %(text_primary)s;
 }
 
 /* Scroll bars */
 QScrollBar:vertical {
-    background-color: #f5f5f5;
+    background-color: %(bg_secondary)s;
     width: 10px;
     margin: 0;
 }
 
 QScrollBar::handle:vertical {
-    background-color: #bdbdbd;
+    background-color: %(text_disabled)s;
     border-radius: 5px;
     min-height: 20px;
     margin: 2px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background-color: #9e9e9e;
+    background-color: %(text_secondary)s;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
@@ -420,20 +463,20 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 
 QScrollBar:horizontal {
-    background-color: #f5f5f5;
+    background-color: %(bg_secondary)s;
     height: 10px;
     margin: 0;
 }
 
 QScrollBar::handle:horizontal {
-    background-color: #bdbdbd;
+    background-color: %(text_disabled)s;
     border-radius: 5px;
     min-width: 20px;
     margin: 2px;
 }
 
 QScrollBar::handle:horizontal:hover {
-    background-color: #9e9e9e;
+    background-color: %(text_secondary)s;
 }
 
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
@@ -443,7 +486,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 /* Slider */
 QSlider::groove:horizontal {
     height: 4px;
-    background-color: #e0e0e0;
+    background-color: %(border)s;
     border-radius: 2px;
 }
 
@@ -451,40 +494,41 @@ QSlider::handle:horizontal {
     width: 14px;
     height: 14px;
     margin: -5px 0;
-    background-color: #1976d2;
+    background-color: %(accent)s;
     border-radius: 7px;
 }
 
 QSlider::handle:horizontal:hover {
-    background-color: #1565c0;
+    background-color: %(accent_hover)s;
 }
 
 /* Check box */
 QCheckBox {
     spacing: 6px;
     font-size: 12px;
+    color: %(text_primary)s;
 }
 
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid #bdbdbd;
+    border: 1px solid %(border_dark)s;
     border-radius: 3px;
-    background-color: #ffffff;
+    background-color: %(bg_primary)s;
 }
 
 QCheckBox::indicator:checked {
-    background-color: #1976d2;
-    border-color: #1976d2;
+    background-color: %(accent)s;
+    border-color: %(accent)s;
 }
 
 QCheckBox::indicator:hover {
-    border-color: #757575;
+    border-color: %(text_secondary)s;
 }
 
-/* Labels - ensure no borders anywhere */
+/* Labels */
 QLabel, QGroupBox QLabel, QFormLayout QLabel, QWidget QLabel {
-    color: #212121;
+    color: %(text_primary)s;
     font-size: 12px;
     border: 0px none transparent;
     border-width: 0px;
@@ -498,17 +542,17 @@ QLabel, QGroupBox QLabel, QFormLayout QLabel, QWidget QLabel {
 QLabel#heading {
     font-size: 14px;
     font-weight: 600;
-    color: #1976d2;
+    color: %(accent)s;
 }
 
 QLabel#subheading {
-    color: #757575;
+    color: %(text_secondary)s;
     font-size: 11px;
 }
 
 /* Splitter */
 QSplitter::handle {
-    background-color: #e0e0e0;
+    background-color: %(border)s;
 }
 
 QSplitter::handle:horizontal {
@@ -521,17 +565,17 @@ QSplitter::handle:vertical {
 
 /* Tooltip */
 QToolTip {
-    background-color: #424242;
-    color: #ffffff;
+    background-color: %(tooltip_bg)s;
+    color: %(tooltip_text)s;
     border: none;
     padding: 4px 8px;
     font-size: 11px;
 }
 
-/* Frame - only style actual frames, not labels */
+/* Frame */
 QFrame[frameShape="4"], QFrame[frameShape="5"], QFrame[frameShape="6"] {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
+    background-color: %(bg_primary)s;
+    border: 1px solid %(border)s;
     border-radius: 4px;
 }
 
@@ -558,7 +602,7 @@ QTabWidget::pane {
 
 QTabBar::tab {
     background-color: transparent;
-    color: #757575;
+    color: %(text_secondary)s;
     padding: 8px 16px;
     margin-right: 4px;
     border: none;
@@ -567,14 +611,14 @@ QTabBar::tab {
 }
 
 QTabBar::tab:selected {
-    color: #1976d2;
-    border-bottom: 2px solid #1976d2;
+    color: %(accent)s;
+    border-bottom: 2px solid %(accent)s;
     font-weight: 600;
 }
 
 QTabBar::tab:hover:!selected {
-    color: #212121;
-    background-color: #f5f5f5;
+    color: %(text_primary)s;
+    background-color: %(bg_secondary)s;
 }
 """
 
@@ -605,9 +649,17 @@ class SpinBoxNoButtonsFilter(QObject):
 _spinbox_filter = None
 
 
-def apply_theme(app: QApplication) -> None:
-    """Apply the light theme to the application."""
-    app.setStyleSheet(STYLESHEET)
+def apply_theme(app: QApplication, theme='light') -> None:
+    """Apply the specified theme to the application."""
+    colors = DARK_COLORS if theme == 'dark' else LIGHT_COLORS
+    
+    # Update global colors reference for other modules
+    global COLORS
+    COLORS.clear()
+    COLORS.update(colors)
+    
+    # Apply stylesheet
+    app.setStyleSheet(THEME_TEMPLATE % colors)
     
     # Install global event filter to remove spinbox buttons
     global _spinbox_filter
@@ -617,24 +669,28 @@ def apply_theme(app: QApplication) -> None:
     
     # Also set palette for native widgets
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['bg_secondary']))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(COLORS['text_primary']))
-    palette.setColor(QPalette.ColorRole.Base, QColor(COLORS['bg_primary']))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(COLORS['bg_secondary']))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor('#424242'))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor('#ffffff'))
-    palette.setColor(QPalette.ColorRole.Text, QColor(COLORS['text_primary']))
-    palette.setColor(QPalette.ColorRole.Button, QColor(COLORS['bg_primary']))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(COLORS['text_primary']))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor(COLORS['accent']))
-    palette.setColor(QPalette.ColorRole.Link, QColor(COLORS['highlight']))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(COLORS['accent']))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
+    palette.setColor(QPalette.ColorRole.Window, QColor(colors['bg_secondary']))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(colors['text_primary']))
+    palette.setColor(QPalette.ColorRole.Base, QColor(colors['bg_primary']))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(colors['bg_secondary']))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(colors['tooltip_bg']))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(colors['tooltip_text']))
+    palette.setColor(QPalette.ColorRole.Text, QColor(colors['text_primary']))
+    palette.setColor(QPalette.ColorRole.Button, QColor(colors['bg_primary']))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(colors['text_primary']))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(colors['accent']))
+    palette.setColor(QPalette.ColorRole.Link, QColor(colors['highlight']))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(colors['accent']))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(colors['text_inverse']))
     
     app.setPalette(palette)
 
 
-# Keep backward compatibility
+def apply_light_theme(app: QApplication) -> None:
+    """Apply light theme."""
+    apply_theme(app, 'light')
+
+
 def apply_dark_theme(app: QApplication) -> None:
-    """Backward compatible alias."""
-    apply_theme(app)
+    """Apply dark theme."""
+    apply_theme(app, 'dark')

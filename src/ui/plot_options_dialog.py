@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 
 from src.models.register import Register
 from src.models.variable import Variable
+from src.ui.styles import COLORS
 
 
 class PlotOptionsDialog(QDialog):
@@ -159,7 +160,7 @@ class PlotOptionsDialog(QDialog):
         self.reg_scroll.setWidgetResizable(True)
         self.reg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.reg_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.reg_scroll.setStyleSheet("border: 1px solid #e0e0e0; border-radius: 4px; background: #ffffff;")
+        self.reg_scroll.setStyleSheet(f"border: 1px solid {COLORS['border']}; border-radius: 4px; background: {COLORS['bg_widget']};")
         self.reg_scroll.setMinimumHeight(200)
         
         self.reg_container = QWidget()
@@ -200,7 +201,7 @@ class PlotOptionsDialog(QDialog):
         var_scroll.setWidgetResizable(True)
         var_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         var_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        var_scroll.setStyleSheet("border: 1px solid #e0e0e0; border-radius: 4px; background: #ffffff;")
+        var_scroll.setStyleSheet(f"border: 1px solid {COLORS['border']}; border-radius: 4px; background: {COLORS['bg_widget']};")
         var_scroll.setMinimumHeight(200)
         
         self.variable_container = QWidget()

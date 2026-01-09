@@ -31,8 +31,15 @@ class ViewerTableView(TableView):
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
         self.config = config
+        self.update_style()
         self._rebuild_tabs()
         self._update_column_visibility()
+
+    def update_style(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+        # Trigger re-populate to update text colors if needed
+        if hasattr(self, 'project') and self.project:
+            self.set_registers(self.project.registers)
 
     def _rebuild_tabs(self):
         """Recreate device tabs with current filtering."""
@@ -41,7 +48,8 @@ class ViewerTableView(TableView):
 
     def _setup_ui(self) -> None:
         """Setup the table UI without the toolbar."""
-        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        # Initial style setup - will be updated by set_admin_mode/update_theme
+        self.update_style()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -249,9 +257,9 @@ class ViewerPlotView(PlotView):
     """Modified PlotView for the viewer."""
     
     def set_admin_mode(self, is_admin: bool, config=None):
-        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
         self.is_admin = is_admin
         self.config = config
+        self.update_style()
         
         if self.config:
             # Load visual settings
@@ -280,6 +288,29 @@ class ViewerPlotView(PlotView):
                 if getattr(self, 'legend', None):
                     self.plot_widget.removeItem(self.legend)
                     self.legend = None
+
+    def update_style(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+        if hasattr(self.plot_widget, 'setBackground'):
+             self.plot_widget.setBackground(COLORS['bg_widget'])
+
+        # Update pyqtgraph configuration for future items
+        pg.setConfigOptions(foreground=COLORS['text_primary'], background=COLORS['bg_widget'])
+
+        # Update Axes
+        text_color = COLORS['text_primary']
+        axis_pen = pg.mkPen(color=COLORS['text_secondary'], width=1)
+        for axis_name in ['left', 'bottom']:
+            ax = self.plot_widget.getAxis(axis_name)
+            ax.setPen(axis_pen)
+            ax.setTextPen(text_color)
+
+        # Update Legend
+        if getattr(self, 'legend', None):
+            for sample, label in self.legend.items:
+                 # Force text update with color
+                 label.setText(label.text, color=text_color)
+                 label.setAttr('color', text_color)
 
     def _show_options(self) -> None:
         """Override to filter visible registers and variables in the dialog."""
@@ -396,8 +427,17 @@ class ViewerVariablesPanel(VariablesPanel):
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
         self.config = config
+        self.update_style()
         self._rebuild_tabs()
         self._update_column_visibility()
+
+    def update_style(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+        # Re-populate to update text colors
+        if hasattr(self, 'project') and self.project:
+            # force refresh of live registers/vars? 
+            # Usually handled by `set_registers` call from main window
+            pass
 
     def _rebuild_tabs(self):
         """Recreate device tabs with current filtering."""
@@ -406,7 +446,7 @@ class ViewerVariablesPanel(VariablesPanel):
 
     def _setup_ui(self) -> None:
         """Setup the panel UI without the toolbar."""
-        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        self.update_style()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -583,8 +623,12 @@ class ViewerBitsPanel(BitsPanel):
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
         self.config = config
+        self.update_style()
         self._rebuild_tabs()
         self._update_column_visibility()
+
+    def update_style(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
 
     def _rebuild_tabs(self):
         """Recreate device tabs with current filtering."""
@@ -593,7 +637,7 @@ class ViewerBitsPanel(BitsPanel):
 
     def _setup_ui(self) -> None:
         """Setup the panel UI without the toolbar."""
-        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        self.update_style()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
@@ -1059,6 +1103,121 @@ class ViewerTextPanel(QWidget):
             # Restoration is handled by dialog.reject()
             pass
 
+class ImageSettingsDialog(QDialog):
+    """Dialog for image panel settings (image, margin, alignment)."""
+    settings_changed = Signal(dict)
+
+    def __init__(self, current_path, current_margin, current_align, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Image Settings")
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        # Image Selection
+        img_group = QVBoxLayout()
+        img_group.setSpacing(5)
+        img_group.addWidget(QLabel("Image Source:"))
+        
+        path_layout = QHBoxLayout()
+        self.path_edit = QLineEdit(current_path)
+        self.path_edit.setPlaceholderText("No image selected")
+        self.path_edit.setReadOnly(True)
+        
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._browse_image)
+        
+        path_layout.addWidget(self.path_edit)
+        path_layout.addWidget(browse_btn)
+        img_group.addLayout(path_layout)
+        layout.addLayout(img_group)
+        
+        # Margin
+        margin_group = QVBoxLayout()
+        margin_group.setSpacing(5)
+        
+        margin_header = QHBoxLayout()
+        margin_header.addWidget(QLabel("Margin:"))
+        self.margin_val_label = QLabel(f"{current_margin}px")
+        margin_header.addWidget(self.margin_val_label)
+        margin_header.addStretch()
+        margin_group.addLayout(margin_header)
+        
+        self.margin_slider = QSlider(Qt.Orientation.Horizontal)
+        self.margin_slider.setRange(0, 100)
+        self.margin_slider.setValue(current_margin)
+        self.margin_slider.valueChanged.connect(self._on_margin_changed)
+        margin_group.addWidget(self.margin_slider)
+        
+        layout.addLayout(margin_group)
+
+        # Alignment
+        align_group = QVBoxLayout()
+        align_group.setSpacing(5)
+        align_group.addWidget(QLabel("Alignment:"))
+        
+        self.align_combo = QComboBox()
+        self.align_options = [
+            ("Center", Qt.AlignmentFlag.AlignCenter),
+            ("Top", Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter),
+            ("Bottom", Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter),
+            ("Left", Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("Right", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ]
+        
+        for name, flag in self.align_options:
+            self.align_combo.addItem(name, flag)
+            
+        # Set current selection
+        current_found = False
+        for i in range(self.align_combo.count()):
+            if self.align_combo.itemData(i) == current_align:
+                self.align_combo.setCurrentIndex(i)
+                current_found = True
+                break
+        
+        if not current_found:
+            self.align_combo.setCurrentIndex(0)
+        
+        self.align_combo.currentIndexChanged.connect(self._emit_settings)
+        align_group.addWidget(self.align_combo)
+        layout.addLayout(align_group)
+        
+        # Action Buttons
+        btns = QHBoxLayout()
+        ok_btn = QPushButton("Apply")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        
+        btns.addStretch()
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+        
+    def _browse_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+        if path:
+            self.path_edit.setText(path)
+            self._emit_settings()
+            
+    def _on_margin_changed(self, value):
+        self.margin_val_label.setText(f"{value}px")
+        self._emit_settings()
+    
+    def _emit_settings(self):
+        self.settings_changed.emit(self.get_settings())
+
+    def get_settings(self):
+        return {
+            "path": self.path_edit.text(),
+            "margin": self.margin_slider.value(),
+            "alignment": self.align_combo.currentData()
+        }
+
 class ViewerImagePanel(QWidget):
     """Simple panel for displaying an image with adjustable margin."""
     def __init__(self, parent=None):
@@ -1067,6 +1226,7 @@ class ViewerImagePanel(QWidget):
         self._pixmap = None
         self._image_path = ""
         self._margin = 0
+        self._alignment = Qt.AlignmentFlag.AlignCenter
         self._setup_ui()
         
     def _setup_ui(self):
@@ -1074,72 +1234,69 @@ class ViewerImagePanel(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
-        self.image_label = QLabel("Double-click to insert image (Admin)")
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label = QLabel("Double-click to edit (Admin)")
+        self.image_label.setAlignment(self._alignment)
         self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.image_label.setMinimumSize(10, 10) # Allow shrinking
         self.layout.addWidget(self.image_label, 1)
 
-        # Margin control (Admin only)
-        self.controls_widget = QWidget()
-        controls_layout = QHBoxLayout(self.controls_widget)
-        controls_layout.setContentsMargins(10, 5, 10, 5)
-        
-        self.margin_label = QLabel("Margin: 0px")
-        controls_layout.addWidget(self.margin_label)
-        
-        self.margin_slider = QSlider(Qt.Orientation.Horizontal)
-        self.margin_slider.setRange(0, 100)
-        self.margin_slider.setValue(0)
-        self.margin_slider.valueChanged.connect(self._on_margin_changed)
-        controls_layout.addWidget(self.margin_slider)
-        
-        self.controls_widget.setVisible(False)
-        self.layout.addWidget(self.controls_widget)
-
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
-        if not self.is_admin and self.image_label.text() == "Double-click to insert image (Admin)":
-            self.image_label.setText("No Image")
-        
-        # Show/hide controls
-        self.controls_widget.setVisible(is_admin)
-
-    def _on_margin_changed(self, value):
-        self._margin = value
-        self.margin_label.setText(f"Margin: {value}px")
-        self.layout.setContentsMargins(value, value, value, value)
-        self._update_image_display()
+        if not self._image_path:
+            text = "Double-click to edit (Admin)" if is_admin else "No Image"
+            self.image_label.setText(text)
 
     def mouseDoubleClickEvent(self, event):
         if not self.is_admin:
             return super().mouseDoubleClickEvent(event)
-        self._upload_image()
+        
+        # Save current settings for restoration if cancelled
+        original_settings = self.get_settings()
+        
+        dialog = ImageSettingsDialog(self._image_path, self._margin, self._alignment, self)
+        # Connect real-time update
+        dialog.settings_changed.connect(self._apply_settings)
+        
+        if dialog.exec():
+            # Apply confirmed settings (already applied via signal, but safe to set again or ensure robustness)
+            self._apply_settings(dialog.get_settings())
+        else:
+            # Cancelled, revert to original settings
+            self._apply_settings(original_settings)
 
-    def _upload_image(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
-        if path:
+    def _apply_settings(self, settings):
+        path = settings.get("path")
+        margin = settings.get("margin", 0)
+        alignment = settings.get("alignment", Qt.AlignmentFlag.AlignCenter)
+        
+        self._margin = margin
+        self.layout.setContentsMargins(margin, margin, margin, margin)
+        
+        self._alignment = alignment
+        self.image_label.setAlignment(alignment)
+        
+        if path != self._image_path:
             self.load_image(path)
+        else:
+            # Just re-render if only margin/alignment changed
+            self._update_image_display()
 
     def load_image(self, path):
         """Public method to load image from path."""
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             self._image_path = path
             self._pixmap = QPixmap(path)
             self.image_label.setText("")
             self._update_image_display()
         else:
-            self.image_label.setText("Image Not Found")
+            self._image_path = ""
+            self._pixmap = None
+            text = "Double-click to edit (Admin)" if self.is_admin else "No Image"
+            self.image_label.setText(text)
+            self.image_label.setPixmap(QPixmap())
 
     def _update_image_display(self):
         if self._pixmap and not self._pixmap.isNull():
-            # Scale to fit while keeping aspect ratio
-            # Must account for margins if we were calculating manually, but layout handles placement.
-            # However, QPixmap.scaled needs target size.
-            # self.image_label.size() returns the current size of the widget.
-            # If margins increase, the widget size might change (or layout forces it smaller).
-            # We should initiate a repaint? standard resizeEvent handles it.
-            
             label_size = self.image_label.size()
             if label_size.width() > 0 and label_size.height() > 0:
                 scaled = self._pixmap.scaled(
@@ -1148,6 +1305,12 @@ class ViewerImagePanel(QWidget):
                     Qt.TransformationMode.SmoothTransformation
                 )
                 self.image_label.setPixmap(scaled)
+        else:
+             if hasattr(self, 'image_label'): # Guard against init issues
+                 if not self.image_label.pixmap() or self.image_label.pixmap().isNull():
+                     if not self.image_label.text():
+                         text = "Double-click to edit (Admin)" if self.is_admin else "No Image"
+                         self.image_label.setText(text)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1156,18 +1319,25 @@ class ViewerImagePanel(QWidget):
     def get_settings(self):
         return {
             "path": self._image_path,
-            "margin": self._margin
+            "margin": self._margin,
+            "alignment": int(self._alignment)
         }
 
     def set_settings(self, settings):
-        path = settings.get("path")
+        path = settings.get("path", "")
         margin = settings.get("margin", 0)
+        align_int = settings.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
         
-        if path:
-            self.load_image(path)
-        
-        if margin is not None:
-            self.margin_slider.setValue(margin) # This triggers _on_margin_changed
+        try:
+            alignment = Qt.AlignmentFlag(align_int)
+        except:
+            alignment = Qt.AlignmentFlag.AlignCenter
+
+        self._apply_settings({
+            "path": path,
+            "margin": margin,
+            "alignment": alignment
+        })
 
 
 class MinimalScanDialog(QDialog):
@@ -1257,7 +1427,7 @@ class ConnectionPanel(QWidget):
         self._setup_ui()
         
     def _setup_ui(self):
-        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: white;")
+        self.update_style()
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(10, 5, 10, 5)
         self.layout.setSpacing(10)
@@ -1333,6 +1503,11 @@ class ConnectionPanel(QWidget):
         self.toggle_connection.emit(checked)
 
     def set_admin_mode(self, is_admin: bool, config=None):
-        # Admin can access everything, users might have restricted view
-        # For now, it's the same for both
-        pass
+        # Update style on admin mode change (or theme change)
+        self.update_style()
+        
+    def update_style(self):
+         self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+         # Re-apply connect button style if needed
+         if hasattr(self, 'connect_btn') and self.connect_btn.isChecked():
+             self._on_connect_toggled(True)

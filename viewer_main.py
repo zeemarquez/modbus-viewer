@@ -9,7 +9,7 @@ import ctypes
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from src.ui.viewer.viewer_window import ViewerWindow
-from src.ui.styles import apply_dark_theme
+from src.ui.styles import apply_light_theme, apply_dark_theme
 
 def main():
     # Fix for Windows taskbar icon
@@ -27,7 +27,7 @@ def main():
     app.setOrganizationName("ModbusViewer")
     
     # Apply theme
-    apply_dark_theme(app)
+    apply_light_theme(app)
     
     # Create and show main window
     window = ViewerWindow()

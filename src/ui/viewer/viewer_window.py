@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QStatusBar, QFileDialog, QMessageBox, 
     QLabel, QComboBox, QToolButton, QDialog, QLineEdit, QSpinBox,
-    QPushButton, QFormLayout, QSizePolicy, QMenu, QDockWidget
+    QPushButton, QFormLayout, QSizePolicy, QMenu, QDockWidget, QApplication
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QByteArray
 from PySide6.QtGui import QAction, QIcon
@@ -24,7 +24,7 @@ from src.ui.viewer.components import (
     MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel
 )
 from src.ui.scan_dialog import ScanWorker
-from src.ui.styles import COLORS
+from src.ui.styles import COLORS, apply_theme
 
 class AdminLoginDialog(QDialog):
     """Password protection dialog for admin access."""
@@ -63,6 +63,10 @@ class ViewerWindow(QMainWindow):
         
         # Load Viewer Config
         self.config = ViewerConfig.load()
+        
+        # Apply configured theme
+        if self.config.app_theme != "light":
+            apply_theme(QApplication.instance(), self.config.app_theme)
         
         # Initialize Core components
         self.project = Project()
@@ -210,9 +214,11 @@ class ViewerWindow(QMainWindow):
         
         self.options_menu = menubar.addMenu("Options")
         self.view_menu = menubar.addMenu("View")
+        self.themes_menu = menubar.addMenu("Themes")
         self.insert_menu = menubar.addMenu("Insert")
         self._update_options_menu()
         self._update_view_menu()
+        self._update_themes_menu()
         self._update_insert_menu()
 
     def _update_view_menu(self):
@@ -276,6 +282,30 @@ class ViewerWindow(QMainWindow):
             
             image_action = self.insert_menu.addAction("Image Panel")
             image_action.triggered.connect(self._add_image_panel)
+
+    def _update_themes_menu(self):
+        """Update Themes menu based on admin state."""
+        self.themes_menu.clear()
+        self.themes_menu.setEnabled(self.is_admin)
+        self.themes_menu.menuAction().setVisible(self.is_admin)
+        
+        if self.is_admin:
+            light_action = self.themes_menu.addAction("Light theme")
+            light_action.setCheckable(True)
+            light_action.setChecked(self.config.app_theme == "light")
+            light_action.triggered.connect(lambda: self._set_theme("light"))
+            
+            dark_action = self.themes_menu.addAction("Dark theme")
+            dark_action.setCheckable(True)
+            dark_action.setChecked(self.config.app_theme == "dark")
+            dark_action.triggered.connect(lambda: self._set_theme("dark"))
+
+    def _set_theme(self, theme_name):
+        self.config.app_theme = theme_name
+        self.config.save()
+        apply_theme(QApplication.instance(), theme_name)
+        self._update_themes_menu()
+        self._update_ui_state()
 
     def _update_options_menu(self):
         """Update Options menu based on admin state."""
@@ -554,6 +584,7 @@ class ViewerWindow(QMainWindow):
         # Refresh the menus
         self._update_options_menu()
         self._update_view_menu()
+        self._update_themes_menu()
         self._update_insert_menu()
         
         # Enumerate all docks to set features and admin mode

@@ -12,6 +12,7 @@ class ViewerConfig:
     """Modbus Viewer application configuration."""
     
     admin_password: str = "admin123"
+    app_theme: str = "light"
     project_path: str = ""  # Path to the exported JSON from Explorer
     
     # Window state
@@ -54,6 +55,7 @@ class ViewerConfig:
     def to_dict(self) -> dict:
         return {
             "admin_password": self.admin_password,
+            "app_theme": self.app_theme,
             "project_path": self.project_path,
             "port": self.port,
             "baud_rate": self.baud_rate,
@@ -88,6 +90,7 @@ class ViewerConfig:
     def from_dict(cls, data: dict) -> "ViewerConfig":
         return cls(
             admin_password=data.get("admin_password", "admin123"),
+            app_theme=data.get("app_theme", "light"),
             project_path=data.get("project_path", ""),
             port=data.get("port", ""),
             baud_rate=data.get("baud_rate", 9600),
