@@ -512,17 +512,19 @@ class ViewerWindow(QMainWindow):
         self.table_view.set_registers(self.project.registers)
         self.table_view.set_slave_ids(slave_ids)
         
+        # Get live registers
+        live_registers = self.table_view.get_live_registers()
+        
         # Sync Variables
-        self.variables_panel.set_registers(self.project.registers)
+        # Pass live_registers (expanded with device IDs) so the evaluator can resolve references like D2.R100
+        self.variables_panel.set_registers(live_registers)
         self.variables_panel.set_variables(self.project.variables)
         self.variables_panel.set_slave_ids(slave_ids)
         
         # Sync Bits
         self.bits_panel.set_registers(self.project.registers)
         self.bits_panel.set_bits(self.project.bits)
-        self.bits_panel.set_slave_ids(slave_ids, self.table_view.get_live_registers())
-        
-        live_registers = self.table_view.get_live_registers()
+        self.bits_panel.set_slave_ids(slave_ids, live_registers)
         live_variables = self.variables_panel.get_live_variables()
         live_bits = self.bits_panel.get_live_bits()
         
@@ -715,10 +717,12 @@ class ViewerWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
         self._update_ui_state()
 
-    def _add_image_panel(self, image_path=None, object_name=None):
+    def _add_image_panel(self, image_path=None, settings=None, object_name=None):
         """Add a new image panel dock."""
         panel = ViewerImagePanel()
-        if image_path:
+        if settings:
+            panel.set_settings(settings)
+        elif image_path:
             panel.load_image(image_path)
             
         dock = QDockWidget("Image Panel", self)
@@ -735,7 +739,9 @@ class ViewerWindow(QMainWindow):
             self._add_text_panel(settings=p_data, object_name=p_data.get("object_name"))
             
         for p_data in self.config.image_panels:
-            self._add_image_panel(image_path=p_data.get("path"), object_name=p_data.get("object_name"))
+            # Check if p_data is old format (dict with just path?) or new settings dict
+            # ViewerImagePanel.set_settings handles dict with defaults
+            self._add_image_panel(settings=p_data, object_name=p_data.get("object_name"))
 
         if self.config.geometry:
             try:
@@ -768,10 +774,9 @@ class ViewerWindow(QMainWindow):
             elif obj_name.startswith("ImagePanel_"):
                 widget = dock.widget()
                 if isinstance(widget, ViewerImagePanel):
-                    image_panels.append({
-                        "object_name": obj_name,
-                        "path": widget._image_path
-                    })
+                    data = widget.get_settings()
+                    data["object_name"] = obj_name
+                    image_panels.append(data)
                     
         self.config.text_panels = text_panels
         self.config.image_panels = image_panels

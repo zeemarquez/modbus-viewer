@@ -4,7 +4,8 @@ from PySide6.QtWidgets import (
     QHeaderView, QMenu, QCheckBox, QWidget, QAbstractItemView, QLabel,
     QDialog, QProgressBar, QPushButton, QLineEdit, QHBoxLayout,
     QSizePolicy, QFileDialog, QFontDialog, QColorDialog,
-    QFontComboBox, QSpinBox, QComboBox, QToolButton
+    QFontComboBox, QSpinBox, QComboBox, QToolButton,
+    QSlider
 )
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QColor, QBrush, QPixmap, QAction
@@ -424,10 +425,11 @@ class ViewerVariablesPanel(VariablesPanel):
         table.verticalHeader().setVisible(False)
         
         header = table.horizontalHeader()
-        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_menu)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
+        
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
         return table
 
@@ -1058,12 +1060,13 @@ class ViewerTextPanel(QWidget):
             pass
 
 class ViewerImagePanel(QWidget):
-    """Simple panel for displaying an image."""
+    """Simple panel for displaying an image with adjustable margin."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.is_admin = False
         self._pixmap = None
         self._image_path = ""
+        self._margin = 0
         self._setup_ui()
         
     def _setup_ui(self):
@@ -1077,10 +1080,36 @@ class ViewerImagePanel(QWidget):
         self.image_label.setMinimumSize(10, 10) # Allow shrinking
         self.layout.addWidget(self.image_label, 1)
 
+        # Margin control (Admin only)
+        self.controls_widget = QWidget()
+        controls_layout = QHBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.margin_label = QLabel("Margin: 0px")
+        controls_layout.addWidget(self.margin_label)
+        
+        self.margin_slider = QSlider(Qt.Orientation.Horizontal)
+        self.margin_slider.setRange(0, 100)
+        self.margin_slider.setValue(0)
+        self.margin_slider.valueChanged.connect(self._on_margin_changed)
+        controls_layout.addWidget(self.margin_slider)
+        
+        self.controls_widget.setVisible(False)
+        self.layout.addWidget(self.controls_widget)
+
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
         if not self.is_admin and self.image_label.text() == "Double-click to insert image (Admin)":
             self.image_label.setText("No Image")
+        
+        # Show/hide controls
+        self.controls_widget.setVisible(is_admin)
+
+    def _on_margin_changed(self, value):
+        self._margin = value
+        self.margin_label.setText(f"Margin: {value}px")
+        self.layout.setContentsMargins(value, value, value, value)
+        self._update_image_display()
 
     def mouseDoubleClickEvent(self, event):
         if not self.is_admin:
@@ -1105,6 +1134,12 @@ class ViewerImagePanel(QWidget):
     def _update_image_display(self):
         if self._pixmap and not self._pixmap.isNull():
             # Scale to fit while keeping aspect ratio
+            # Must account for margins if we were calculating manually, but layout handles placement.
+            # However, QPixmap.scaled needs target size.
+            # self.image_label.size() returns the current size of the widget.
+            # If margins increase, the widget size might change (or layout forces it smaller).
+            # We should initiate a repaint? standard resizeEvent handles it.
+            
             label_size = self.image_label.size()
             if label_size.width() > 0 and label_size.height() > 0:
                 scaled = self._pixmap.scaled(
@@ -1117,6 +1152,22 @@ class ViewerImagePanel(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_image_display()
+
+    def get_settings(self):
+        return {
+            "path": self._image_path,
+            "margin": self._margin
+        }
+
+    def set_settings(self, settings):
+        path = settings.get("path")
+        margin = settings.get("margin", 0)
+        
+        if path:
+            self.load_image(path)
+        
+        if margin is not None:
+            self.margin_slider.setValue(margin) # This triggers _on_margin_changed
 
 
 class MinimalScanDialog(QDialog):
