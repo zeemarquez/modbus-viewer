@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QIcon
 from src.ui.main_window import MainWindow
-from src.ui.styles import apply_dark_theme
+from src.ui.styles import apply_light_theme
 
 
 def get_last_project_path() -> str:
@@ -50,8 +50,8 @@ def main():
             app.setWindowIcon(QIcon(path))
             break
     
-    # Apply dark theme
-    apply_dark_theme(app)
+    # Apply light theme
+    apply_light_theme(app)
     
     # Get last opened project path
     last_project = get_last_project_path()

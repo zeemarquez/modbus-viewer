@@ -1,4 +1,6 @@
 import os
+import csv
+from datetime import datetime
 from PySide6.QtWidgets import (
     QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem, 
     QHeaderView, QMenu, QCheckBox, QWidget, QAbstractItemView, QLabel,
@@ -255,6 +257,83 @@ class ViewerTableView(TableView):
 
 class ViewerPlotView(PlotView):
     """Modified PlotView for the viewer."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._add_export_button()
+
+    def _add_export_button(self):
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedWidth(60)
+        self.export_btn.setFixedHeight(32)
+        self.export_btn.clicked.connect(self._export_data)
+        
+        # Add to toolbar (which is the first item in the main layout)
+        layout = self.layout()
+        if layout and layout.count() > 0:
+            toolbar_item = layout.itemAt(0)
+            if toolbar_item and toolbar_item.layout():
+                toolbar = toolbar_item.layout()
+                # Find options button index
+                idx = toolbar.indexOf(self.options_btn)
+                if idx >= 0:
+                    toolbar.insertWidget(idx + 1, self.export_btn)
+                else:
+                    toolbar.addWidget(self.export_btn)
+
+    def _export_data(self):
+        """Export current plot data to CSV."""
+        if not self._plot_items:
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Plot Data",
+            f"modbus_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                
+                # Headers
+                headers = []
+                data_columns = []
+                max_rows = 0
+                
+                # Collect data
+                for key, plot_item in self._plot_items.items():
+                    name = plot_item.opts.get('name', key)
+                    x, y = plot_item.getData()
+                    
+                    if x is None or y is None or len(x) == 0:
+                        continue
+                        
+                    headers.extend([f"{name} (Time)", f"{name} (Value)"])
+                    data_columns.append(x)
+                    data_columns.append(y)
+                    max_rows = max(max_rows, len(x))
+                
+                writer.writerow(headers)
+                
+                # Write rows
+                for i in range(max_rows):
+                    row = []
+                    for col in data_columns:
+                        if i < len(col):
+                            row.append(str(col[i]))
+                        else:
+                            row.append("")
+                    writer.writerow(row)
+                    
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
+
     
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
@@ -1267,8 +1346,13 @@ class ViewerImagePanel(QWidget):
     def _apply_settings(self, settings):
         path = settings.get("path")
         margin = settings.get("margin", 0)
-        alignment = settings.get("alignment", Qt.AlignmentFlag.AlignCenter)
+        align_val = settings.get("alignment", Qt.AlignmentFlag.AlignCenter)
         
+        # Robustly handle alignment being an int or Flag
+        alignment = align_val
+        if isinstance(align_val, int):
+            alignment = Qt.Alignment(align_val)
+            
         self._margin = margin
         self.layout.setContentsMargins(margin, margin, margin, margin)
         
@@ -1328,15 +1412,10 @@ class ViewerImagePanel(QWidget):
         margin = settings.get("margin", 0)
         align_int = settings.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
         
-        try:
-            alignment = Qt.AlignmentFlag(align_int)
-        except:
-            alignment = Qt.AlignmentFlag.AlignCenter
-
         self._apply_settings({
             "path": path,
             "margin": margin,
-            "alignment": alignment
+            "alignment": align_int
         })
 
 

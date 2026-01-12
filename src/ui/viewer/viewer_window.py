@@ -110,6 +110,7 @@ class ViewerWindow(QMainWindow):
     def _set_window_icon(self) -> None:
         """Set window icon from assets."""
         icon_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "icon_viewer.png"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "icon.ico"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "icon.png"),
         ]
