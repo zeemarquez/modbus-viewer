@@ -1191,7 +1191,7 @@ class ImageSettingsDialog(QDialog):
     def __init__(self, current_path, current_margin, current_align, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Image Settings")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -1214,24 +1214,60 @@ class ImageSettingsDialog(QDialog):
         img_group.addLayout(path_layout)
         layout.addLayout(img_group)
         
-        # Margin
-        margin_group = QVBoxLayout()
-        margin_group.setSpacing(5)
+        # Margins - Individual controls for each border
+        margin_group = QGroupBox("Margins")
+        margin_layout = QVBoxLayout()
+        margin_layout.setSpacing(10)
         
-        margin_header = QHBoxLayout()
-        margin_header.addWidget(QLabel("Margin:"))
-        self.margin_val_label = QLabel(f"{current_margin}px")
-        margin_header.addWidget(self.margin_val_label)
-        margin_header.addStretch()
-        margin_group.addLayout(margin_header)
+        # Helper function to create a margin control
+        def create_margin_control(label_text, default_value):
+            control_layout = QHBoxLayout()
+            label = QLabel(f"{label_text}:")
+            label.setMinimumWidth(60)
+            
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(default_value)
+            
+            value_label = QLabel(f"{default_value}px")
+            value_label.setMinimumWidth(50)
+            value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            
+            def on_value_changed(value):
+                value_label.setText(f"{value}px")
+                self._emit_settings()
+            
+            slider.valueChanged.connect(on_value_changed)
+            
+            control_layout.addWidget(label)
+            control_layout.addWidget(slider)
+            control_layout.addWidget(value_label)
+            
+            return slider, value_label, control_layout
         
-        self.margin_slider = QSlider(Qt.Orientation.Horizontal)
-        self.margin_slider.setRange(0, 100)
-        self.margin_slider.setValue(current_margin)
-        self.margin_slider.valueChanged.connect(self._on_margin_changed)
-        margin_group.addWidget(self.margin_slider)
+        # Handle backward compatibility: if current_margin is a number, use it for all sides
+        if isinstance(current_margin, (int, float)):
+            margin_top = margin_bottom = margin_left = margin_right = int(current_margin)
+        elif isinstance(current_margin, dict):
+            margin_top = current_margin.get("top", 0)
+            margin_bottom = current_margin.get("bottom", 0)
+            margin_left = current_margin.get("left", 0)
+            margin_right = current_margin.get("right", 0)
+        else:
+            margin_top = margin_bottom = margin_left = margin_right = 0
         
-        layout.addLayout(margin_group)
+        self.margin_top_slider, self.margin_top_label, top_layout = create_margin_control("Top", margin_top)
+        self.margin_bottom_slider, self.margin_bottom_label, bottom_layout = create_margin_control("Bottom", margin_bottom)
+        self.margin_left_slider, self.margin_left_label, left_layout = create_margin_control("Left", margin_left)
+        self.margin_right_slider, self.margin_right_label, right_layout = create_margin_control("Right", margin_right)
+        
+        margin_layout.addLayout(top_layout)
+        margin_layout.addLayout(bottom_layout)
+        margin_layout.addLayout(left_layout)
+        margin_layout.addLayout(right_layout)
+        
+        margin_group.setLayout(margin_layout)
+        layout.addWidget(margin_group)
 
         # Alignment
         align_group = QVBoxLayout()
@@ -1291,17 +1327,18 @@ class ImageSettingsDialog(QDialog):
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Error", "Failed to copy image to resources folder.")
             
-    def _on_margin_changed(self, value):
-        self.margin_val_label.setText(f"{value}px")
-        self._emit_settings()
-    
     def _emit_settings(self):
         self.settings_changed.emit(self.get_settings())
 
     def get_settings(self):
         return {
             "path": self.path_edit.text(),
-            "margin": self.margin_slider.value(),
+            "margin": {
+                "top": self.margin_top_slider.value(),
+                "bottom": self.margin_bottom_slider.value(),
+                "left": self.margin_left_slider.value(),
+                "right": self.margin_right_slider.value()
+            },
             "alignment": self.align_combo.currentData()
         }
 
@@ -1312,7 +1349,7 @@ class ViewerImagePanel(QWidget):
         self.is_admin = False
         self._pixmap = None
         self._image_path = ""
-        self._margin = 0
+        self._margin = {"top": 0, "bottom": 0, "left": 0, "right": 0}
         self._alignment = Qt.AlignmentFlag.AlignCenter
         self._setup_ui()
         
@@ -1340,6 +1377,7 @@ class ViewerImagePanel(QWidget):
         # Save current settings for restoration if cancelled
         original_settings = self.get_settings()
         
+        # Pass margin dict to dialog
         dialog = ImageSettingsDialog(self._image_path, self._margin, self._alignment, self)
         # Connect real-time update
         dialog.settings_changed.connect(self._apply_settings)
@@ -1353,7 +1391,7 @@ class ViewerImagePanel(QWidget):
 
     def _apply_settings(self, settings):
         path = settings.get("path")
-        margin = settings.get("margin", 0)
+        margin = settings.get("margin", {"top": 0, "bottom": 0, "left": 0, "right": 0})
         align_val = settings.get("alignment", Qt.AlignmentFlag.AlignCenter)
         
         # Migrate absolute paths to relative paths if needed
@@ -1368,9 +1406,29 @@ class ViewerImagePanel(QWidget):
         alignment = align_val
         if isinstance(align_val, int):
             alignment = Qt.Alignment(align_val)
+        
+        # Handle backward compatibility: if margin is a number, convert to dict
+        if isinstance(margin, (int, float)):
+            margin = {"top": int(margin), "bottom": int(margin), "left": int(margin), "right": int(margin)}
+        elif not isinstance(margin, dict):
+            margin = {"top": 0, "bottom": 0, "left": 0, "right": 0}
+        
+        # Ensure all keys exist
+        margin = {
+            "top": margin.get("top", 0),
+            "bottom": margin.get("bottom", 0),
+            "left": margin.get("left", 0),
+            "right": margin.get("right", 0)
+        }
             
         self._margin = margin
-        self.layout.setContentsMargins(margin, margin, margin, margin)
+        # setContentsMargins(left, top, right, bottom)
+        self.layout.setContentsMargins(
+            margin["left"],
+            margin["top"],
+            margin["right"],
+            margin["bottom"]
+        )
         
         self._alignment = alignment
         self.image_label.setAlignment(alignment)
@@ -1429,8 +1487,12 @@ class ViewerImagePanel(QWidget):
 
     def set_settings(self, settings):
         path = settings.get("path", "")
-        margin = settings.get("margin", 0)
+        margin = settings.get("margin", {"top": 0, "bottom": 0, "left": 0, "right": 0})
         align_int = settings.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
+        
+        # Handle backward compatibility: if margin is a number, convert to dict
+        if isinstance(margin, (int, float)):
+            margin = {"top": int(margin), "bottom": int(margin), "left": int(margin), "right": int(margin)}
         
         self._apply_settings({
             "path": path,
