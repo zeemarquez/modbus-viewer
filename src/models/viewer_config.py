@@ -66,6 +66,10 @@ class ViewerConfig:
     plot_y_min: float = 0.0
     plot_y_max: float = 100.0
     
+    # Recording settings
+    recording_registers: List[str] = field(default_factory=list)
+    recording_variables: List[str] = field(default_factory=list)
+    
     # Custom Panels
     text_panels: List[dict] = field(default_factory=list)
     image_panels: List[dict] = field(default_factory=list)
@@ -102,6 +106,8 @@ class ViewerConfig:
             "plot_y_auto_scale": self.plot_y_auto_scale,
             "plot_y_min": self.plot_y_min,
             "plot_y_max": self.plot_y_max,
+            "recording_registers": self.recording_registers,
+            "recording_variables": self.recording_variables,
             "text_panels": self.text_panels,
             "image_panels": self.image_panels,
         }
@@ -139,6 +145,8 @@ class ViewerConfig:
             plot_y_auto_scale=data.get("plot_y_auto_scale", True),
             plot_y_min=data.get("plot_y_min", 0.0),
             plot_y_max=data.get("plot_y_max", 100.0),
+            recording_registers=data.get("recording_registers", []),
+            recording_variables=data.get("recording_variables", []),
             text_panels=data.get("text_panels", []),
             image_panels=data.get("image_panels", []),
         )

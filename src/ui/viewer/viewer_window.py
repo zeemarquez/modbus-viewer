@@ -25,7 +25,8 @@ from src.utils.resources_manager import (
 )
 from src.ui.viewer.components import (
     ViewerTableView, ViewerPlotView, ViewerVariablesPanel, ViewerBitsPanel,
-    MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel
+    MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel,
+    RecordingPanel
 )
 from src.ui.viewer.calibration_dialog import CalibrationDialog
 from src.ui.viewer.window_properties_dialog import WindowPropertiesDialog
@@ -189,10 +190,19 @@ class ViewerWindow(QMainWindow):
         self.bits_dock.setWidget(self.bits_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.bits_dock)
         
+        # Recording Dock
+        self.recording_dock = QDockWidget("Recording", self)
+        self.recording_dock.setObjectName("RecordingDock")
+        self.recording_panel = RecordingPanel()
+        self.recording_panel.set_data_engine(self.data_engine)
+        self.recording_dock.setWidget(self.recording_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.recording_dock)
+        
         # Orientation
         self.splitDockWidget(self.table_dock, self.plot_dock, Qt.Orientation.Vertical)
         self.tabifyDockWidget(self.plot_dock, self.variables_dock)
         self.tabifyDockWidget(self.variables_dock, self.bits_dock)
+        self.tabifyDockWidget(self.bits_dock, self.recording_dock)
         
         # Connection Dock (Replacing Toolbar)
         self.connection_dock = QDockWidget("Connection", self)
@@ -265,7 +275,7 @@ class ViewerWindow(QMainWindow):
         all_docks = self.findChildren(QDockWidget)
         
         # Sort them: fixed docks first, then others
-        fixed_names = ["ConnectionDock", "TableDock", "PlotDock", "VariablesDock", "BitsDock"]
+        fixed_names = ["ConnectionDock", "TableDock", "PlotDock", "VariablesDock", "BitsDock", "RecordingDock"]
         
         # Connection first
         conn_dock = next((d for d in all_docks if d.objectName() == "ConnectionDock"), None)
@@ -565,15 +575,20 @@ class ViewerWindow(QMainWindow):
             self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
             self._sync_registers()
             self.data_engine.start()
+            # Update recording panel connection state
+            self.recording_panel.set_connection_state(True)
         except Exception as e:
             QMessageBox.critical(self, "Connection Error", str(e))
             self.connect_action.setChecked(False)
+            self.recording_panel.set_connection_state(False)
 
     def _disconnect(self):
         self.data_engine.stop()
         self.modbus.disconnect()
         self.connection_label.setText("?? Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
+        # Update recording panel connection state
+        self.recording_panel.set_connection_state(False)
 
     def _sync_registers(self):
         slave_ids = self.config.slave_ids
@@ -603,6 +618,10 @@ class ViewerWindow(QMainWindow):
         
         self.plot_view.set_registers(live_registers)
         self.plot_view.set_variables(live_variables)
+        
+        # Sync Recording panel
+        self.recording_panel.set_registers(live_registers)
+        self.recording_panel.set_variables(live_variables)
 
     def _on_admin_clicked(self):
         dialog = AdminLoginDialog(self.config.admin_password, self)
@@ -630,7 +649,7 @@ class ViewerWindow(QMainWindow):
         # Enumerate all docks to set features and admin mode
         for dock in self.findChildren(QDockWidget):
             # Known fixed docks
-            is_fixed = dock.objectName() in ("TableDock", "PlotDock", "VariablesDock", "BitsDock", "ConnectionDock")
+            is_fixed = dock.objectName() in ("TableDock", "PlotDock", "VariablesDock", "BitsDock", "ConnectionDock", "RecordingDock")
             
             if self.is_admin:
                 features = (
@@ -642,8 +661,8 @@ class ViewerWindow(QMainWindow):
                 dock.setTitleBarWidget(None) # Show title for dragging and closing
             else:
                 dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-                # Hide title for extra panels, connection, and plot panels in user mode
-                if not is_fixed or dock.objectName() in ("ConnectionDock", "PlotDock"):
+                # Hide title for extra panels, connection, plot, and recording panels in user mode
+                if not is_fixed or dock.objectName() in ("ConnectionDock", "PlotDock", "RecordingDock"):
                     dock.setTitleBarWidget(QWidget()) # Hide title
             
             # Propagate admin mode to widgets
@@ -660,6 +679,11 @@ class ViewerWindow(QMainWindow):
         self.variables_panel.set_admin_mode(self.is_admin, self.config)
         self.bits_panel.set_admin_mode(self.is_admin, self.config)
         self.plot_view.set_admin_mode(self.is_admin, self.config)
+        self.recording_panel.set_admin_mode(self.is_admin, self.config)
+        
+        # Recording panel is visible to all users (same as other panels)
+        # Set initial connection state
+        self.recording_panel.set_connection_state(self.modbus.is_connected)
 
     def _import_project(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import Registers", "", "JSON (*.json)")
@@ -806,6 +830,7 @@ class ViewerWindow(QMainWindow):
         self.variables_panel.update_values()
         self.bits_panel.update_values()
         self.plot_view.update_plot(self.data_engine)
+        self.recording_panel.update_recording()
 
     def _on_error(self, msg):
         self.statusbar.showMessage(f"Error: {msg}", 5000)
@@ -814,6 +839,7 @@ class ViewerWindow(QMainWindow):
         self.connect_action.setChecked(False)
         self._disconnect()
         QMessageBox.warning(self, "Connection Lost", "Modbus connection lost.")
+        # Connection state already updated by _disconnect()
 
     def _update_status(self):
         if self.data_engine.is_running:

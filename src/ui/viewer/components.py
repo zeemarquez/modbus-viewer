@@ -1,15 +1,16 @@
 import os
 import csv
 from datetime import datetime
+from typing import Dict, List
 from PySide6.QtWidgets import (
     QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem, 
     QHeaderView, QMenu, QCheckBox, QWidget, QAbstractItemView, QLabel,
     QDialog, QProgressBar, QPushButton, QLineEdit, QHBoxLayout,
     QSizePolicy, QFileDialog, QFontDialog, QColorDialog,
     QFontComboBox, QSpinBox, QComboBox, QToolButton,
-    QSlider
+    QSlider, QGroupBox, QDialogButtonBox, QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer
 from PySide6.QtGui import QColor, QBrush, QPixmap, QAction
 import pyqtgraph as pg
 from src.ui.table_view import TableView
@@ -1609,3 +1610,543 @@ class ConnectionPanel(QWidget):
          # Re-apply connect button style if needed
          if hasattr(self, 'connect_btn') and self.connect_btn.isChecked():
              self._on_connect_toggled(True)
+
+class RecordingConfigurationDialog(QDialog):
+    """Dialog for selecting variables to record."""
+    
+    def __init__(self, registers: list, variables: list, 
+                 selected_registers: list = None, selected_variables: list = None,
+                 parent=None):
+        super().__init__(parent)
+        
+        self.registers = registers or []
+        self.variables = variables or []
+        self.selected_registers = selected_registers or []
+        self.selected_variables = selected_variables or []
+        
+        self._register_checkbox_map: Dict[tuple, QCheckBox] = {}  # (address, label) -> checkbox
+        self._variable_checkbox_map: Dict[str, QCheckBox] = {}   # name -> checkbox
+        
+        self.setWindowTitle("Recording Configuration")
+        self.setMinimumSize(500, 400)
+        self.setModal(True)
+        
+        self._setup_ui()
+    
+    def _setup_ui(self) -> None:
+        """Setup the dialog UI."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        
+        selection_group = QGroupBox("Select Variables to Record")
+        selection_layout = QVBoxLayout(selection_group)
+        selection_layout.setSpacing(12)
+        
+        # Registers section
+        reg_section = QVBoxLayout()
+        reg_section.setSpacing(4)
+        
+        reg_title = QLabel("Registers:")
+        reg_title.setStyleSheet("font-size: 11px; font-weight: 500;")
+        reg_section.addWidget(reg_title)
+        
+        self.reg_scroll = QScrollArea()
+        self.reg_scroll.setWidgetResizable(True)
+        self.reg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.reg_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.reg_scroll.setStyleSheet(f"border: 1px solid {COLORS['border']}; border-radius: 4px; background: {COLORS['bg_widget']};")
+        self.reg_scroll.setMinimumHeight(150)
+        
+        self.reg_container = QWidget()
+        self.reg_container.setStyleSheet("background: transparent;")
+        self.reg_layout = QVBoxLayout(self.reg_container)
+        self.reg_layout.setContentsMargins(8, 8, 8, 8)
+        self.reg_layout.setSpacing(4)
+        
+        self.reg_scroll.setWidget(self.reg_container)
+        reg_section.addWidget(self.reg_scroll, stretch=1)
+        
+        # Register buttons
+        reg_btn_layout = QHBoxLayout()
+        reg_btn_layout.setSpacing(4)
+        select_all_reg_btn = QPushButton("All")
+        select_all_reg_btn.setFixedWidth(50)
+        select_all_reg_btn.clicked.connect(self._select_all_registers)
+        reg_btn_layout.addWidget(select_all_reg_btn)
+        
+        select_none_reg_btn = QPushButton("None")
+        select_none_reg_btn.setFixedWidth(50)
+        select_none_reg_btn.clicked.connect(self._select_none_registers)
+        reg_btn_layout.addWidget(select_none_reg_btn)
+        reg_btn_layout.addStretch()
+        reg_section.addLayout(reg_btn_layout)
+        
+        selection_layout.addLayout(reg_section, stretch=1)
+        
+        # Variables section
+        var_section = QVBoxLayout()
+        var_section.setSpacing(4)
+        
+        var_title = QLabel("Variables:")
+        var_title.setStyleSheet("font-size: 11px; font-weight: 500;")
+        var_section.addWidget(var_title)
+        
+        var_scroll = QScrollArea()
+        var_scroll.setWidgetResizable(True)
+        var_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        var_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        var_scroll.setStyleSheet(f"border: 1px solid {COLORS['border']}; border-radius: 4px; background: {COLORS['bg_widget']};")
+        var_scroll.setMinimumHeight(150)
+        
+        self.variable_container = QWidget()
+        self.variable_container.setStyleSheet("background: transparent;")
+        self.variable_layout = QVBoxLayout(self.variable_container)
+        self.variable_layout.setContentsMargins(8, 8, 8, 8)
+        self.variable_layout.setSpacing(4)
+        
+        var_scroll.setWidget(self.variable_container)
+        var_section.addWidget(var_scroll, stretch=1)
+        
+        # Variable buttons
+        var_btn_layout = QHBoxLayout()
+        var_btn_layout.setSpacing(4)
+        select_all_var_btn = QPushButton("All")
+        select_all_var_btn.setFixedWidth(50)
+        select_all_var_btn.clicked.connect(self._select_all_variables)
+        var_btn_layout.addWidget(select_all_var_btn)
+        
+        select_none_var_btn = QPushButton("None")
+        select_none_var_btn.setFixedWidth(50)
+        select_none_var_btn.clicked.connect(self._select_none_variables)
+        var_btn_layout.addWidget(select_none_var_btn)
+        var_btn_layout.addStretch()
+        var_section.addLayout(var_btn_layout)
+        
+        selection_layout.addLayout(var_section, stretch=1)
+        
+        main_layout.addWidget(selection_group, stretch=1)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | 
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        main_layout.addWidget(button_box)
+        
+        # Populate register and variable checkboxes
+        self._populate_checkboxes()
+    
+    def _populate_checkboxes(self) -> None:
+        """Populate register and variable checkboxes."""
+        # Clear existing register checkboxes
+        for i in reversed(range(self.reg_layout.count())):
+            self.reg_layout.itemAt(i).widget().setParent(None)
+        self._register_checkbox_map.clear()
+        
+        # Clear existing variable checkboxes
+        for i in reversed(range(self.variable_layout.count())):
+            self.variable_layout.itemAt(i).widget().setParent(None)
+        self._variable_checkbox_map.clear()
+        
+        # Group registers by (address, label) to show them uniquely
+        unique_regs = {}
+        for reg in self.registers:
+            key = (reg.address, reg.label)
+            if key not in unique_regs:
+                unique_regs[key] = []
+            unique_regs[key].append(reg)
+            
+        for key in sorted(unique_regs.keys()):
+            address, label = key
+            display_label = label if label else f"R{address}"
+            
+            checkbox = QCheckBox(display_label)
+            checkbox.setStyleSheet("font-size: 11px;")
+            
+            # Check if any instance of this register is currently selected
+            is_selected = any(r.designator in self.selected_registers for r in unique_regs[key])
+            checkbox.setChecked(is_selected)
+            
+            self.reg_layout.addWidget(checkbox)
+            self._register_checkbox_map[key] = checkbox
+        
+        # Group variables by name
+        unique_vars = {}
+        for var in self.variables:
+            if var.name not in unique_vars:
+                unique_vars[var.name] = []
+            unique_vars[var.name].append(var)
+            
+        for name in sorted(unique_vars.keys()):
+            # Use label if available for display
+            var_instance = unique_vars[name][0]
+            display_label = var_instance.label if var_instance.label else name
+            
+            checkbox = QCheckBox(display_label)
+            checkbox.setStyleSheet("font-size: 11px;")
+            
+            # Check if any instance of this variable is currently selected
+            is_selected = any(v.designator in self.selected_variables for v in unique_vars[name])
+            checkbox.setChecked(is_selected)
+            
+            self.variable_layout.addWidget(checkbox)
+            self._variable_checkbox_map[name] = checkbox
+    
+    def _select_all_registers(self):
+        """Select all register checkboxes."""
+        for checkbox in self._register_checkbox_map.values():
+            checkbox.setChecked(True)
+    
+    def _select_none_registers(self):
+        """Deselect all register checkboxes."""
+        for checkbox in self._register_checkbox_map.values():
+            checkbox.setChecked(False)
+    
+    def _select_all_variables(self):
+        """Select all variable checkboxes."""
+        for checkbox in self._variable_checkbox_map.values():
+            checkbox.setChecked(True)
+    
+    def _select_none_variables(self):
+        """Deselect all variable checkboxes."""
+        for checkbox in self._variable_checkbox_map.values():
+            checkbox.setChecked(False)
+    
+    def get_selected(self) -> dict:
+        """Get the selected registers and variables."""
+        selected_registers = []
+        for key, checkbox in self._register_checkbox_map.items():
+            if checkbox.isChecked():
+                address, label = key
+                # Include all designators that match this address and label
+                for reg in self.registers:
+                    if reg.address == address and reg.label == label:
+                        selected_registers.append(reg.designator)
+                        
+        selected_variables = []
+        for name, checkbox in self._variable_checkbox_map.items():
+            if checkbox.isChecked():
+                # Include all designators that match this name
+                for var in self.variables:
+                    if var.name == name:
+                        selected_variables.append(var.designator)
+        
+        return {
+            'selected_registers': list(set(selected_registers)),
+            'selected_variables': list(set(selected_variables)),
+        }
+
+class RecordingPanel(QWidget):
+    """Panel for recording variable data to CSV."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_admin = False
+        self.config = None
+        self.data_engine = None
+        self.registers = []
+        self.variables = []
+        
+        # Recording state
+        self._is_recording = False
+        self._recorded_data = {}  # designator -> list of (timestamp, value)
+        self._selected_registers = []
+        self._selected_variables = []
+        
+        # Pulsing animation
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._update_pulse)
+        self._pulse_alpha = 0.0
+        self._pulse_direction = 1
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        """Setup the recording panel UI - horizontal layout."""
+        self.update_style()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+        
+        # Configure button (gear icon)
+        self.configure_btn = QPushButton("⚙")
+        self.configure_btn.setFixedSize(32, 32)
+        self.configure_btn.setToolTip("Configure Recording Variables")
+        self.configure_btn.clicked.connect(self._show_configure_dialog)
+        layout.addWidget(self.configure_btn)
+        
+        # Start/Stop toggle button (play icon slightly bigger)
+        self.record_btn = QPushButton("▶")
+        self.record_btn.setFixedSize(32, 32)
+        self.record_btn.setCheckable(True)
+        self.record_btn.setToolTip("Start/Stop Recording")
+        self.record_btn.setStyleSheet("font-size: 14px;")  # Make icon slightly bigger
+        self.record_btn.toggled.connect(self._on_record_toggled)
+        self.record_btn.setEnabled(False)  # Disabled by default until connected
+        layout.addWidget(self.record_btn)
+        
+        layout.addStretch()
+        
+        # Export button
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedWidth(60)
+        self.export_btn.setFixedHeight(32)
+        self.export_btn.setToolTip("Export Recorded Data to CSV")
+        self.export_btn.clicked.connect(self._export_data)
+        layout.addWidget(self.export_btn)
+    
+    def set_admin_mode(self, is_admin: bool, config=None):
+        self.is_admin = is_admin
+        self.config = config
+        self.update_style()
+        # Load saved recording configuration
+        if self.config:
+            self._selected_registers = self.config.recording_registers.copy()
+            self._selected_variables = self.config.recording_variables.copy()
+    
+    def update_style(self):
+        self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+    
+    def set_data_engine(self, data_engine):
+        """Set the data engine for recording."""
+        self.data_engine = data_engine
+    
+    def set_connection_state(self, is_connected: bool):
+        """Update button state based on connection."""
+        self.record_btn.setEnabled(is_connected)
+        if not is_connected and self._is_recording:
+            # Stop recording if connection is lost
+            self.record_btn.setChecked(False)
+            self._stop_recording()
+    
+    def set_registers(self, registers: list):
+        """Set available registers."""
+        self.registers = registers
+    
+    def set_variables(self, variables: list):
+        """Set available variables."""
+        self.variables = variables
+    
+    def _show_configure_dialog(self):
+        """Show dialog to select variables for recording."""
+        if not self.config:
+            return
+        
+        # Filter registers and variables (same as plot panel)
+        visible_regs = [r for r in self.registers if f"R{r.address}" not in self.config.hidden_registers]
+        visible_vars = [v for v in self.variables if v.name not in self.config.hidden_variables]
+        
+        dialog = RecordingConfigurationDialog(
+            registers=visible_regs,
+            variables=visible_vars,
+            selected_registers=self._selected_registers,
+            selected_variables=self._selected_variables,
+            parent=self
+        )
+        
+        if dialog.exec():
+            options = dialog.get_selected()
+            self._selected_registers = options['selected_registers']
+            self._selected_variables = options['selected_variables']
+            
+            # Save to config
+            if self.config:
+                self.config.recording_registers = self._selected_registers.copy()
+                self.config.recording_variables = self._selected_variables.copy()
+                self.config.save()
+    
+    def _on_record_toggled(self, checked: bool):
+        """Handle record button toggle."""
+        if checked:
+            self._start_recording()
+        else:
+            self._stop_recording()
+    
+    def _start_recording(self):
+        """Start recording data."""
+        if not self._selected_registers and not self._selected_variables:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Variables Selected", "Please configure recording variables first.")
+            self.record_btn.setChecked(False)
+            return
+        
+        # Clear previous recording data
+        self._recorded_data = {}
+        for designator in self._selected_registers + self._selected_variables:
+            self._recorded_data[designator] = []
+        
+        self._is_recording = True
+        self.record_btn.setText("■")
+        self.record_btn.setToolTip("Stop Recording")
+        # Keep the bigger font size for stop icon too
+        self.record_btn.setStyleSheet("font-size: 14px;")
+        
+        # Start pulsing animation
+        self._pulse_alpha = 0.0
+        self._pulse_direction = 1
+        self._pulse_timer.start(50)  # Update every 50ms for smooth animation
+        self._update_pulse()
+    
+    def _stop_recording(self):
+        """Stop recording data."""
+        self._is_recording = False
+        self.record_btn.setText("▶")
+        self.record_btn.setToolTip("Start Recording")
+        # Keep the bigger font size for play icon
+        self.record_btn.setStyleSheet("font-size: 14px;")
+        
+        # Stop pulsing animation
+        self._pulse_timer.stop()
+        self._reset_button_style()
+    
+    def _update_pulse(self):
+        """Update pulsing animation."""
+        if not self._is_recording:
+            return
+        
+        # Update alpha (0.3 to 1.0)
+        self._pulse_alpha += 0.05 * self._pulse_direction
+        if self._pulse_alpha >= 1.0:
+            self._pulse_alpha = 1.0
+            self._pulse_direction = -1
+        elif self._pulse_alpha <= 0.3:
+            self._pulse_alpha = 0.3
+            self._pulse_direction = 1
+        
+        # Calculate red color intensity (darker to brighter red)
+        # Base red: #c62828 (197, 40, 40)
+        # Pulse between darker (#8b1a1a) and brighter (#ff4444)
+        base_r, base_g, base_b = 197, 40, 40
+        dark_r, dark_g, dark_b = 139, 26, 26
+        bright_r, bright_g, bright_b = 255, 68, 68
+        
+        # Interpolate between dark and bright based on pulse_alpha
+        r = int(dark_r + (bright_r - dark_r) * self._pulse_alpha)
+        g = int(dark_g + (bright_g - dark_g) * self._pulse_alpha)
+        b = int(dark_b + (bright_b - dark_b) * self._pulse_alpha)
+        
+        color_hex = f"#{r:02x}{g:02x}{b:02x}"
+        
+        self.record_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {color_hex};
+                color: white;
+                border: 1px solid {color_hex};
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: #ff4444;
+            }}
+        """)
+    
+    def _reset_button_style(self):
+        """Reset button to default style but keep font size."""
+        self.record_btn.setStyleSheet("font-size: 14px;")
+    
+    def update_recording(self):
+        """Update recording with current data from registers and variables."""
+        if not self._is_recording:
+            return
+        
+        import time
+        now = time.time()
+        
+        # Record selected registers
+        for designator in self._selected_registers:
+            # Find register by designator
+            reg = next((r for r in self.registers if r.designator == designator), None)
+            if reg and reg.scaled_value is not None:
+                self._recorded_data[designator].append((now, reg.scaled_value))
+        
+        # Record selected variables
+        for designator in self._selected_variables:
+            # Find variable by designator
+            var = next((v for v in self.variables if v.designator == designator), None)
+            if var and var.value is not None:
+                self._recorded_data[designator].append((now, var.value))
+    
+    def _export_data(self):
+        """Export recorded data to CSV."""
+        if not self._recorded_data or all(len(data) == 0 for data in self._recorded_data.values()):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Data", "No recorded data to export.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Recorded Data",
+            f"modbus_recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                
+                # Get all designators and their labels
+                designator_labels = {}
+                for reg in self.registers:
+                    if reg.designator in self._recorded_data:
+                        label = f"D{reg.slave_id}.{reg.label}" if reg.label else reg.designator
+                        designator_labels[reg.designator] = label
+                
+                for var in self.variables:
+                    if var.designator in self._recorded_data:
+                        label = var.label or var.name
+                        if not var.is_global and var.slave_id:
+                            label = f"D{var.slave_id}.{label}"
+                        designator_labels[var.designator] = label
+                
+                # Headers - same format as plot export
+                headers = []
+                data_columns = []
+                max_rows = 0
+                
+                # Collect data
+                for designator in sorted(self._recorded_data.keys()):
+                    data = self._recorded_data[designator]
+                    if not data:
+                        continue
+                    
+                    label = designator_labels.get(designator, designator)
+                    headers.extend([f"{label} (Time)", f"{label} (Value)"])
+                    
+                    # Extract timestamps and values
+                    timestamps = []
+                    values = []
+                    for dp in data:
+                        timestamps.append(dp[0])
+                        values.append(dp[1])
+                    
+                    data_columns.append(timestamps)
+                    data_columns.append(values)
+                    max_rows = max(max_rows, len(data))
+                
+                if not headers:
+                    return
+                
+                writer.writerow(headers)
+                
+                # Write rows - same format as plot export
+                for i in range(max_rows):
+                    row = []
+                    for col_idx, col in enumerate(data_columns):
+                        if i < len(col):
+                            if col_idx % 2 == 0:  # Timestamp column
+                                row.append(datetime.fromtimestamp(col[i]).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
+                            else:  # Value column
+                                row.append(str(col[i]))
+                        else:
+                            row.append("")
+                    writer.writerow(row)
+                    
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
