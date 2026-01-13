@@ -2,7 +2,8 @@
 Real-time table view for register values with multi-device tab support.
 """
 
-from typing import List, Optional, Dict, Tuple
+import struct
+from typing import List, Optional, Dict, Tuple, Union
 
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QSettings
 from PySide6.QtGui import QColor, QBrush
 
-from src.models.register import Register, AccessMode, DisplayFormat
+from src.models.register import Register, AccessMode, DisplayFormat, ByteOrder
 from src.ui.styles import COLORS
 
 
@@ -248,7 +249,11 @@ class TableView(QFrame):
                 if value is not None:
                     self._pending_writes[key] = value
                     # Standardize the text format in the cell
-                    formatted = self._format_for_input(reg, int(value))
+                    # For float32, pass the float value directly; for others, convert to int
+                    if reg.display_format == DisplayFormat.FLOAT32 and reg.size == 2:
+                        formatted = self._format_for_input(reg, value)
+                    else:
+                        formatted = self._format_for_input(reg, int(value))
                     if text.lower() != formatted.lower():
                         item.setText(formatted)
                 else:
@@ -334,18 +339,34 @@ class TableView(QFrame):
                     self._update_write_button()
                 break
     
-    def _format_for_input(self, reg: Register, value: int) -> str:
+    def _format_for_input(self, reg: Register, value: Union[int, float]) -> str:
         """Format value for input field based on register's display format."""
         if reg.display_format == DisplayFormat.HEX:
             if reg.size == 1:
-                return f"0x{value & 0xFFFF:04X}"
+                return f"0x{int(value) & 0xFFFF:04X}"
             else:
-                return f"0x{value & 0xFFFFFFFF:08X}"
+                return f"0x{int(value) & 0xFFFFFFFF:08X}"
         elif reg.display_format == DisplayFormat.BINARY:
             if reg.size == 1:
-                return f"{value & 0xFFFF:016b}"
+                return f"{int(value) & 0xFFFF:016b}"
             else:
-                return f"{value & 0xFFFFFFFF:032b}"
+                return f"{int(value) & 0xFFFFFFFF:032b}"
+        elif reg.display_format == DisplayFormat.FLOAT32:
+            # For float32 input, show as decimal float value
+            if isinstance(value, float):
+                # User entered a float value - format it
+                return f"{value:.6f}"
+            elif reg.size == 2 and reg.raw_value is not None:
+                # Display current raw value as float
+                int_val = int(reg.raw_value) & 0xFFFFFFFF
+                bytes_val = int_val.to_bytes(4, byteorder='big')
+                if reg.byte_order == ByteOrder.BIG:
+                    float_val = struct.unpack('>f', bytes_val)[0]
+                else:
+                    float_val = struct.unpack('<f', bytes_val)[0]
+                return f"{float_val:.6f}"
+            else:
+                return str(int(value))
         else:
             # Decimal
             return str(int(value))

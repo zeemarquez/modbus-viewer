@@ -7,7 +7,7 @@ from typing import Optional, Union, List, Dict
 import minimalmodbus
 import serial
 
-from src.models.register import Register, ByteOrder
+from src.models.register import Register, ByteOrder, DisplayFormat
 
 
 class ModbusManager:
@@ -207,7 +207,19 @@ class ModbusManager:
             self.instrument.write_register(register.address, int_value, 0)
         else:
             # Multiple registers - need to split value
-            regs = self._split_value(value, register.size, register.byte_order)
+            # Handle float32 format conversion
+            if register.display_format == DisplayFormat.FLOAT32 and register.size == 2:
+                # Convert float to IEEE 754 float32 integer representation
+                float_val = float(value)
+                if register.byte_order == ByteOrder.BIG:
+                    bytes_val = struct.pack('>f', float_val)
+                else:
+                    bytes_val = struct.pack('<f', float_val)
+                # Convert bytes to integer
+                int_value = int.from_bytes(bytes_val, byteorder='big')
+                regs = self._split_value(int_value, register.size, register.byte_order)
+            else:
+                regs = self._split_value(value, register.size, register.byte_order)
             self.instrument.write_registers(register.address, regs)
     
     def _combine_registers(

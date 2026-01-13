@@ -3,14 +3,14 @@
   "connection": {
     "port": "COM15",
     "slave_ids": [
-      4
+      1
     ],
     "baud_rate": 115200,
     "parity": "N",
     "stop_bits": 1,
     "timeout": 1.0,
     "found_devices": [
-      4
+      1
     ]
   },
   "registers": [
@@ -85,56 +85,6 @@
       "fast_poll": false
     },
     {
-      "address": 11,
-      "size": 1,
-      "label": "DUMMY",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
-      "address": 12,
-      "size": 1,
-      "label": "SCALE CH1",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
-      "address": 13,
-      "size": 1,
-      "label": "SCALE CH2",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
-      "address": 14,
-      "size": 1,
-      "label": "SCALE CH3",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
-      "address": 15,
-      "size": 1,
-      "label": "SCALE CH4",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
       "address": 16,
       "size": 2,
       "label": "TIMESTAMP",
@@ -151,7 +101,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -161,7 +111,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -171,7 +121,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -181,7 +131,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -191,7 +141,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read_write",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": false
     },
     {
@@ -201,17 +151,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read_write",
-      "display_format": "decimal",
-      "fast_poll": false
-    },
-    {
-      "address": 54,
-      "size": 2,
-      "label": "KALMAN SCALE",
-      "byte_order": "big",
-      "scale": 1.0,
-      "access_mode": "read_write",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": false
     },
     {
@@ -221,7 +161,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -231,7 +171,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -241,7 +181,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -251,7 +191,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": true
     },
     {
@@ -261,7 +201,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": false
     },
     {
@@ -271,7 +211,7 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": false
     },
     {
@@ -281,40 +221,11 @@
       "byte_order": "big",
       "scale": 1.0,
       "access_mode": "read_write",
-      "display_format": "decimal",
+      "display_format": "float32",
       "fast_poll": false
     }
   ],
-  "variables": [
-    {
-      "name": "ch1",
-      "label": "CH1",
-      "expression": "R18/R12",
-      "format": "decimal",
-      "is_global": false
-    },
-    {
-      "name": "ch2",
-      "label": "CH2",
-      "expression": "R20/R13",
-      "format": "decimal",
-      "is_global": false
-    },
-    {
-      "name": "ch3",
-      "label": "CH3",
-      "expression": "R22/R14",
-      "format": "decimal",
-      "is_global": false
-    },
-    {
-      "name": "ch4",
-      "label": "CH4",
-      "expression": "R24/R15",
-      "format": "decimal",
-      "is_global": false
-    }
-  ],
+  "variables": [],
   "bits": [
     {
       "name": "RESET",
@@ -375,27 +286,28 @@
       "register_address": 0,
       "bit_index": 3,
       "label": "CALIBRATING"
+    },
+    {
+      "name": "CONFIG_MODE",
+      "register_address": 0,
+      "bit_index": 8,
+      "label": "CONFIG_MODE"
     }
   ],
   "views": {
     "plot_registers": [],
-    "plot_variables": [
-      "D4.ch1",
-      "D4.ch2",
-      "D4.ch3",
-      "D4.ch4"
-    ],
+    "plot_variables": [],
     "plot_time_window": 60,
     "poll_interval": 100,
     "plot_options": {
       "line_width": 1.0,
       "grid_alpha": 0.1,
       "show_legend": true,
-      "time_window_index": 3,
+      "time_window_index": 2,
       "y_auto_scale": true,
-      "y_min": 0.0,
-      "y_max": 220.0
+      "y_min": -100.0,
+      "y_max": 50.0
     }
   },
-  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAEjAAADivwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsAAAAAUgAAA4oAAAKsAP///wAAAAEAAAd8AAADivwCAAAAAfwAAABSAAADigAAAVIA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAAAEAAAFHAAAAAAA////+gAAAAACAAAAAfsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG/AAAAAQAAAd8AAADOQD////8AQAAAAP7AAAAEABQAGwAbwB0AEQAbwBjAGsBAAAABAAAAxoAAAGkAP////wAAAMiAAABrwAAANgA/////AIAAAAC+wAAABoAVgBhAHIAaQBhAGIAbABlAHMARABvAGMAawEAAABSAAABZAAAAKgA////+wAAABAAQgBpAHQAcwBEAG8AYwBrAQAAAboAAAIiAAAApgD////7AAAAGgBSAGUAZwBpAHMAdABlAHIAcwBEAG8AYwBrAQAABNUAAAKrAAAAtQD///8AAAAAAAADigAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAFgBNAGEAaQBuAFQAbwBvAGwAYgBhAHIBAAAAAP////8AAAAAAAAAAA=="
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAEjAAADivwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsAAAAAUgAAA4oAAAKsAP///wAAAAEAAAd8AAADivwCAAAAAfwAAABSAAADigAAAVAA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAAAEAAAFHAAAAAAA////+gAAAAACAAAAAfsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG/AAAAAQAAAd8AAADOQD////8AQAAAAP7AAAAEABQAGwAbwB0AEQAbwBjAGsBAAAABAAAAsUAAAGkAP////wAAALNAAACMwAAANgA/////AIAAAAC+wAAABoAVgBhAHIAaQBhAGIAbABlAHMARABvAGMAawEAAABSAAABZAAAAKYA////+wAAABAAQgBpAHQAcwBEAG8AYwBrAQAAAboAAAIiAAAApgD////7AAAAGgBSAGUAZwBpAHMAdABlAHIAcwBEAG8AYwBrAQAABQQAAAJ8AAAAtQD///8AAAAAAAADigAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAFgBNAGEAaQBuAFQAbwBvAGwAYgBhAHIBAAAAAP////8AAAAAAAAAAA=="
 }

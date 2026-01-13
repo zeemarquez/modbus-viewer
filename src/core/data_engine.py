@@ -5,13 +5,13 @@ Supports multiple devices on the same serial bus.
 
 import time
 import threading
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 from dataclasses import dataclass
 from collections import deque
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from src.models.register import Register
+from src.models.register import Register, DisplayFormat
 from src.models.variable import Variable
 from src.core.modbus_manager import ModbusManager
 from src.core.variable_engine import VariableEvaluator
@@ -286,7 +286,13 @@ class DataEngine(QObject):
                 reg.raw_value = raw_val
                 reg.error = None
                 reg.previous_value = reg.scaled_value
-                reg.scaled_value = reg.apply_scale(raw_val)
+                # For float32, convert raw integer to float first, then apply scale
+                # For other formats, raw_val is already numeric
+                if reg.display_format == DisplayFormat.FLOAT32 and reg.size == 2:
+                    float_val = reg.convert_raw_to_float(raw_val)
+                    reg.scaled_value = reg.apply_scale(float_val)
+                else:
+                    reg.scaled_value = reg.apply_scale(raw_val)
                 self._append_history(reg.designator, reg.scaled_value, now)
             except Exception as e:
                 reg.error = str(e)
@@ -365,13 +371,30 @@ class DataEngine(QObject):
         
         try:
             with self._write_lock:
-                # Convert scaled value back to raw
-                raw_value = value / register.scale if register.scale != 0 else value
+                # For float32 format, write the float value directly without scaling
+                # For other formats, convert scaled value back to raw
+                from src.models.register import DisplayFormat
+                if register.display_format == DisplayFormat.FLOAT32 and register.size == 2:
+                    raw_value = value  # Write float directly as IEEE 754
+                else:
+                    raw_value = value / register.scale if register.scale != 0 else value
                 self.modbus.write_register(register, raw_value)
             return True
         except Exception as e:
             self.error_occurred.emit(f"Write error: {e}")
             return False
+    
+    def read_register_safe(self, slave_id: int, address: int) -> Optional[int]:
+        """Read a register safely with locking to prevent thread conflicts."""
+        if not self.modbus or not self.modbus.is_connected:
+            return None
+        
+        try:
+            with self._write_lock:
+                return self.modbus.read_register_single(slave_id, address)
+        except Exception as e:
+            # Don't emit error signal for calibration reads - just return None
+            return None
     
     def clear_history(self) -> None:
         """Clear all history data."""

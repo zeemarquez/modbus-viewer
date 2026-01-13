@@ -19,10 +19,16 @@ from src.models.viewer_config import ViewerConfig
 from src.core.modbus_manager import ModbusManager
 from src.core.data_engine import DataEngine
 from src.utils.serial_ports import get_available_ports
+from src.utils.resources_manager import (
+    copy_project_to_resources, resolve_resource_path, 
+    migrate_absolute_path_to_relative, ensure_resources_directories
+)
 from src.ui.viewer.components import (
     ViewerTableView, ViewerPlotView, ViewerVariablesPanel, ViewerBitsPanel,
     MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel
 )
+from src.ui.viewer.calibration_dialog import CalibrationDialog
+from src.ui.viewer.window_properties_dialog import WindowPropertiesDialog
 from src.ui.scan_dialog import ScanWorker
 from src.ui.styles import COLORS, apply_theme
 
@@ -82,7 +88,9 @@ class ViewerWindow(QMainWindow):
         self.config.save()
         
         # Setup UI
-        self.setWindowTitle("Modbus Viewer")
+        # Load window title and icon from config
+        window_title = self.config.window_title or "Modbus Viewer"
+        self.setWindowTitle(window_title)
         self.setMinimumSize(1000, 600)
         self._set_window_icon()
         
@@ -93,9 +101,23 @@ class ViewerWindow(QMainWindow):
         # Load settings (geometry and layout)
         self._load_settings()
         
+        # Ensure resources directories exist
+        ensure_resources_directories()
+        
         # Initial load
-        if self.config.project_path and os.path.exists(self.config.project_path):
-            self._load_project(self.config.project_path)
+        if self.config.project_path:
+            resolved_path = resolve_resource_path(self.config.project_path)
+            if resolved_path and os.path.exists(resolved_path):
+                self._load_project(resolved_path)
+            elif os.path.exists(self.config.project_path):
+                # Old absolute path - migrate it
+                relative_path = migrate_absolute_path_to_relative(self.config.project_path, "project")
+                if relative_path:
+                    self.config.project_path = relative_path
+                    self.config.save()
+                    resolved_path = resolve_resource_path(relative_path)
+                    if resolved_path:
+                        self._load_project(resolved_path)
         
         self._refresh_ports()
         if not self.config.project_path:
@@ -108,7 +130,15 @@ class ViewerWindow(QMainWindow):
         self._status_timer.start(500)
 
     def _set_window_icon(self) -> None:
-        """Set window icon from assets."""
+        """Set window icon from config or default assets."""
+        # First try to load from config
+        if self.config.window_icon_path:
+            resolved_path = resolve_resource_path(self.config.window_icon_path)
+            if resolved_path and os.path.exists(resolved_path):
+                self.setWindowIcon(QIcon(resolved_path))
+                return
+        
+        # Fallback to default assets
         icon_paths = [
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "icon_viewer.png"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "assets", "icon.ico"),
@@ -198,7 +228,7 @@ class ViewerWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         
-        self.connection_label = QLabel("🔴 Disconnected")
+        self.connection_label = QLabel("?? Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
         self.statusbar.addWidget(self.connection_label)
         
@@ -312,10 +342,16 @@ class ViewerWindow(QMainWindow):
         """Update Options menu based on admin state."""
         self.options_menu.clear()
         
+        # Calibration dialog - visible to both admin and basic users
+        calibration_action = self.options_menu.addAction("Calibration...")
+        calibration_action.triggered.connect(self._show_calibration_dialog)
+        
         if not self.is_admin:
+            self.options_menu.addSeparator()
             login_action = self.options_menu.addAction("Login as Admin...")
             login_action.triggered.connect(self._on_admin_clicked)
         else:
+            self.options_menu.addSeparator()
             import_action = self.options_menu.addAction("Import Registers (JSON)...")
             import_action.triggered.connect(self._import_project)
             
@@ -324,6 +360,9 @@ class ViewerWindow(QMainWindow):
             
             scan_settings_action = self.options_menu.addAction("Scanning Options...")
             scan_settings_action.triggered.connect(self._show_scanning_options)
+            
+            window_props_action = self.options_menu.addAction("Window Properties...")
+            window_props_action.triggered.connect(self._show_window_properties)
             
             self.options_menu.addSeparator()
             
@@ -522,7 +561,7 @@ class ViewerWindow(QMainWindow):
                 stop_bits=self.config.stop_bits,
                 timeout=self.config.timeout
             )
-            self.connection_label.setText(f"🟢 Connected: {port}")
+            self.connection_label.setText(f"?? Connected: {port}")
             self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
             self._sync_registers()
             self.data_engine.start()
@@ -533,7 +572,7 @@ class ViewerWindow(QMainWindow):
     def _disconnect(self):
         self.data_engine.stop()
         self.modbus.disconnect()
-        self.connection_label.setText("🔴 Disconnected")
+        self.connection_label.setText("?? Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
 
     def _sync_registers(self):
@@ -625,9 +664,18 @@ class ViewerWindow(QMainWindow):
     def _import_project(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import Registers", "", "JSON (*.json)")
         if path:
-            self._load_project(path)
-            self.config.project_path = path
-            self.config.save()
+            # Copy project to resources folder and use relative path
+            relative_path = copy_project_to_resources(path)
+            if relative_path:
+                resolved_path = resolve_resource_path(relative_path)
+                if resolved_path:
+                    self._load_project(resolved_path)
+                    self.config.project_path = relative_path
+                    self.config.save()
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to resolve project path.")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to copy project to resources folder.")
 
     def _load_project(self, path):
         try:
@@ -645,6 +693,28 @@ class ViewerWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Import Error", str(e))
 
+    def _show_calibration_dialog(self):
+        """Show the calibration dialog."""
+        if not self.modbus.is_connected:
+            QMessageBox.warning(self, "Not Connected", "Please connect to the Modbus device before calibrating.")
+            return
+        
+        # Get the first slave ID from config, or default to 1
+        # If multiple devices are connected, use the first one
+        slave_id = self.config.slave_ids[0] if self.config.slave_ids else 1
+        
+        if len(self.config.slave_ids) > 1:
+            # If multiple devices, show a message
+            QMessageBox.information(
+                self,
+                "Multiple Devices",
+                f"Multiple devices connected. Calibration will be performed on Device {slave_id}.\n"
+                "To calibrate a different device, disconnect others first."
+            )
+        
+        dialog = CalibrationDialog(self.modbus, self.data_engine, slave_id, self)
+        dialog.exec()
+    
     def _show_scanning_options(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Scanning Options")
@@ -670,6 +740,27 @@ class ViewerWindow(QMainWindow):
             except ValueError:
                 QMessageBox.warning(self, "Invalid Input", "Timeout must be a number.")
 
+    def _show_window_properties(self):
+        """Show the Window Properties dialog."""
+        dialog = WindowPropertiesDialog(
+            current_title=self.config.window_title or "Modbus Viewer",
+            current_icon_path=self.config.window_icon_path or "",
+            parent=self
+        )
+        
+        if dialog.exec():
+            # Update config
+            new_title = dialog.get_title()
+            new_icon_path = dialog.get_icon_path()
+            
+            self.config.window_title = new_title
+            self.config.window_icon_path = new_icon_path
+            self.config.save()
+            
+            # Update window
+            self.setWindowTitle(new_title)
+            self._set_window_icon()
+    
     def _show_admin_settings(self):
         # Full connection settings matching Explorer
         dialog = QDialog(self)
@@ -770,10 +861,26 @@ class ViewerWindow(QMainWindow):
         for p_data in self.config.text_panels:
             self._add_text_panel(settings=p_data, object_name=p_data.get("object_name"))
             
+        # Migrate image panel paths if needed
+        migrated = False
         for p_data in self.config.image_panels:
+            image_path = p_data.get("path", "")
+            if image_path:
+                # Check if it's an absolute path that needs migration
+                if os.path.isabs(image_path) and os.path.exists(image_path):
+                    # Migrate to relative path
+                    relative_path = migrate_absolute_path_to_relative(image_path, "image")
+                    if relative_path:
+                        p_data["path"] = relative_path
+                        migrated = True
+                # If it's already relative or migrated, keep it
             # Check if p_data is old format (dict with just path?) or new settings dict
             # ViewerImagePanel.set_settings handles dict with defaults
             self._add_image_panel(settings=p_data, object_name=p_data.get("object_name"))
+        
+        # Save migrated paths
+        if migrated:
+            self.config.save()
 
         if self.config.geometry:
             try:

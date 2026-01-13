@@ -19,6 +19,7 @@ from src.ui.bits_panel import BitsPanel
 from src.ui.scan_dialog import ScanWorker
 from src.models.register import AccessMode
 from src.ui.styles import COLORS
+from src.utils.resources_manager import copy_image_to_resources, resolve_resource_path, migrate_absolute_path_to_relative
 
 class ViewerTableView(TableView):
     """Modified TableView for the viewer with visibility controls."""
@@ -1280,8 +1281,14 @@ class ImageSettingsDialog(QDialog):
     def _browse_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
         if path:
-            self.path_edit.setText(path)
-            self._emit_settings()
+            # Copy image to resources folder and use relative path
+            relative_path = copy_image_to_resources(path)
+            if relative_path:
+                self.path_edit.setText(relative_path)
+                self._emit_settings()
+            else:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Error", "Failed to copy image to resources folder.")
             
     def _on_margin_changed(self, value):
         self.margin_val_label.setText(f"{value}px")
@@ -1348,6 +1355,14 @@ class ViewerImagePanel(QWidget):
         margin = settings.get("margin", 0)
         align_val = settings.get("alignment", Qt.AlignmentFlag.AlignCenter)
         
+        # Migrate absolute paths to relative paths if needed
+        if path and os.path.isabs(path) and os.path.exists(path):
+            relative_path = migrate_absolute_path_to_relative(path, "image")
+            if relative_path:
+                path = relative_path
+                # Update settings dict so it gets saved correctly
+                settings["path"] = relative_path
+        
         # Robustly handle alignment being an int or Flag
         alignment = align_val
         if isinstance(align_val, int):
@@ -1366,10 +1381,14 @@ class ViewerImagePanel(QWidget):
             self._update_image_display()
 
     def load_image(self, path):
-        """Public method to load image from path."""
-        if path and os.path.exists(path):
+        """Public method to load image from path (supports both absolute and relative paths)."""
+        # Resolve path (handles both absolute and relative resource paths)
+        resolved_path = resolve_resource_path(path) if path else None
+        
+        if resolved_path and os.path.exists(resolved_path):
+            # Store the original path (relative if from resources, absolute otherwise)
             self._image_path = path
-            self._pixmap = QPixmap(path)
+            self._pixmap = QPixmap(resolved_path)
             self.image_label.setText("")
             self._update_image_display()
         else:

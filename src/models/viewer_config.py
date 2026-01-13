@@ -4,8 +4,24 @@ Configuration model for the Modbus Viewer.
 
 import json
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List
+
+
+def get_config_path(default_filename: str = "viewer_config.json") -> str:
+    """Get the path to the config file, handling both script and executable modes."""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        # Config should be next to the executable
+        base_path = Path(sys.executable).parent
+    else:
+        # Running as script
+        # Config should be in the project root (where viewer_main.py is)
+        base_path = Path(__file__).parent.parent.parent
+    
+    return str(base_path / default_filename)
 
 @dataclass
 class ViewerConfig:
@@ -18,6 +34,8 @@ class ViewerConfig:
     # Window state
     layout_state: Optional[str] = None
     geometry: Optional[str] = None
+    window_title: str = "Modbus Viewer"
+    window_icon_path: str = ""  # Relative path from resources folder
     
     # Overrides for connection settings when in viewer mode
     port: str = ""
@@ -73,6 +91,8 @@ class ViewerConfig:
             "scan_slave_limit": self.scan_slave_limit,
             "layout_state": self.layout_state,
             "geometry": self.geometry,
+            "window_title": self.window_title,
+            "window_icon_path": self.window_icon_path,
             "plot_registers": self.plot_registers,
             "plot_variables": self.plot_variables,
             "plot_line_width": self.plot_line_width,
@@ -108,6 +128,8 @@ class ViewerConfig:
             scan_slave_limit=data.get("scan_slave_limit", 100),
             layout_state=data.get("layout_state"),
             geometry=data.get("geometry"),
+            window_title=data.get("window_title", "Modbus Viewer"),
+            window_icon_path=data.get("window_icon_path", ""),
             plot_registers=data.get("plot_registers", []),
             plot_variables=data.get("plot_variables", []),
             plot_line_width=data.get("plot_line_width", 2.0),
@@ -121,14 +143,18 @@ class ViewerConfig:
             image_panels=data.get("image_panels", []),
         )
     
-    def save(self, path: str = "viewer_config.json") -> None:
+    def save(self, path: str = None) -> None:
         """Save configuration to JSON file."""
+        if path is None:
+            path = get_config_path()
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self.to_dict(), f, indent=2)
             
     @classmethod
-    def load(cls, path: str = "viewer_config.json") -> "ViewerConfig":
+    def load(cls, path: str = None) -> "ViewerConfig":
         """Load configuration from JSON file."""
+        if path is None:
+            path = get_config_path()
         if not os.path.exists(path):
             return cls()
         try:
