@@ -1,0 +1,313 @@
+{
+  "version": "1.0",
+  "connection": {
+    "port": "COM15",
+    "slave_ids": [
+      1
+    ],
+    "baud_rate": 115200,
+    "parity": "N",
+    "stop_bits": 1,
+    "timeout": 1.0,
+    "found_devices": [
+      1
+    ]
+  },
+  "registers": [
+    {
+      "address": 0,
+      "size": 1,
+      "label": "STATUS",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "binary",
+      "fast_poll": false
+    },
+    {
+      "address": 1,
+      "size": 4,
+      "label": "CHIP ID",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "hex",
+      "fast_poll": false
+    },
+    {
+      "address": 5,
+      "size": 1,
+      "label": "FW VERSION",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 6,
+      "size": 1,
+      "label": "CONFIG",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "binary",
+      "fast_poll": false
+    },
+    {
+      "address": 8,
+      "size": 1,
+      "label": "BAUD RATE",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 9,
+      "size": 1,
+      "label": "SLAVE ID",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 10,
+      "size": 1,
+      "label": "COMMAND",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "decimal",
+      "fast_poll": false
+    },
+    {
+      "address": 16,
+      "size": 2,
+      "label": "TIMESTAMP",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "decimal",
+      "fast_poll": true
+    },
+    {
+      "address": 18,
+      "size": 2,
+      "label": "CH1 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 20,
+      "size": 2,
+      "label": "CH2 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 22,
+      "size": 2,
+      "label": "CH3 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 24,
+      "size": 2,
+      "label": "CH4 RAW",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 50,
+      "size": 2,
+      "label": "KALMAN Q",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "float32",
+      "fast_poll": false
+    },
+    {
+      "address": 52,
+      "size": 2,
+      "label": "KALMAN R",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "float32",
+      "fast_poll": false
+    },
+    {
+      "address": 26,
+      "size": 2,
+      "label": "CH1",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 28,
+      "size": 2,
+      "label": "CH2",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 30,
+      "size": 2,
+      "label": "CH3",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 32,
+      "size": 2,
+      "label": "CH4",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": true
+    },
+    {
+      "address": 34,
+      "size": 2,
+      "label": "CH1 GAIN",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": false
+    },
+    {
+      "address": 36,
+      "size": 2,
+      "label": "CH1 OFFSET",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read",
+      "display_format": "float32",
+      "fast_poll": false
+    },
+    {
+      "address": 56,
+      "size": 2,
+      "label": "CAL REF",
+      "byte_order": "big",
+      "scale": 1.0,
+      "access_mode": "read_write",
+      "display_format": "float32",
+      "fast_poll": false
+    }
+  ],
+  "variables": [],
+  "bits": [
+    {
+      "name": "RESET",
+      "register_address": 6,
+      "bit_index": 0,
+      "label": "RESET"
+    },
+    {
+      "name": "ENABLE_CH1",
+      "register_address": 6,
+      "bit_index": 1,
+      "label": "ENABLE_CH1"
+    },
+    {
+      "name": "ENABLE_CH2",
+      "register_address": 6,
+      "bit_index": 2,
+      "label": "ENABLE_CH2"
+    },
+    {
+      "name": "ENABLE_CH3",
+      "register_address": 6,
+      "bit_index": 3,
+      "label": "ENABLE_CH3"
+    },
+    {
+      "name": "ENABLE_CH4",
+      "register_address": 6,
+      "bit_index": 4,
+      "label": "ENABLE_CH4"
+    },
+    {
+      "name": "ENABLE_SHIELD",
+      "register_address": 6,
+      "bit_index": 5,
+      "label": "ENABLE_SHIELD"
+    },
+    {
+      "name": "SYSTEM_ERROR",
+      "register_address": 0,
+      "bit_index": 0,
+      "label": "SYSTEM_ERROR"
+    },
+    {
+      "name": "SENSOR_ERROR",
+      "register_address": 0,
+      "bit_index": 1,
+      "label": "SENSOR_ERROR"
+    },
+    {
+      "name": "SENSOR_RUNNING",
+      "register_address": 0,
+      "bit_index": 2,
+      "label": "SENSOR_RUNNING"
+    },
+    {
+      "name": "CALIBRATING",
+      "register_address": 0,
+      "bit_index": 3,
+      "label": "CALIBRATING"
+    },
+    {
+      "name": "CONFIG_MODE",
+      "register_address": 0,
+      "bit_index": 8,
+      "label": "CONFIG_MODE"
+    }
+  ],
+  "views": {
+    "plot_registers": [],
+    "plot_variables": [],
+    "plot_time_window": 60,
+    "poll_interval": 100,
+    "plot_options": {
+      "line_width": 1.0,
+      "grid_alpha": 0.1,
+      "show_legend": true,
+      "time_window_index": 2,
+      "y_auto_scale": true,
+      "y_min": -100.0,
+      "y_max": 50.0
+    }
+  },
+  "layout_state": "AAAA/wAAAAD9AAAAAgAAAAAAAAEjAAADivwCAAAAAfsAAAAaAFMAcABlAGUAZABUAGUAcwB0AEQAbwBjAGsAAAAAUgAAA4oAAAKsAP///wAAAAEAAAd8AAADivwCAAAAAfwAAABSAAADigAAAVAA/////AEAAAAK/AAABXAAAAIQAAAAAAD////8AgAAAAD8AAAE9QAAAosAAAAAAP////wCAAAAAPwAAAVWAAACKgAAAAAA/////AIAAAAA/AAABOIAAAKeAAAAAAD////8AgAAAAD8AAAEwAAAAsAAAAAAAP////wCAAAAAPwAAAW7AAABxQAAAAAA/////AIAAAAA/AAABbwAAAHEAAAAAAD////8AgAAAAD8AAAFuwAAAcUAAAAAAP////wCAAAAAPwAAAAEAAAFHAAAAAAA////+gAAAAACAAAAAfsAAAAcAEMAbwBuAG4AZQBjAHQAaQBvAG4ARABvAGMAawIAAAs1AAAASQAAAd0AAAHG/AAAAAQAAAd8AAADOQD////8AQAAAAP7AAAAEABQAGwAbwB0AEQAbwBjAGsBAAAABAAAAsUAAAGkAP////wAAALNAAACMwAAANgA/////AIAAAAC+wAAABoAVgBhAHIAaQBhAGIAbABlAHMARABvAGMAawEAAABSAAABZAAAAKYA////+wAAABAAQgBpAHQAcwBEAG8AYwBrAQAAAboAAAIiAAAApgD////7AAAAGgBSAGUAZwBpAHMAdABlAHIAcwBEAG8AYwBrAQAABQQAAAJ8AAAAtQD///8AAAAAAAADigAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAFgBNAGEAaQBuAFQAbwBvAGwAYgBhAHIBAAAAAP////8AAAAAAAAAAA=="
+}

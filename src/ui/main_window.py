@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         # Track found devices from scan
         self._found_devices: list = []
         self._connected_slave_ids: list = []
+        self._connection_lost_dialog_shown = False  # Flag to prevent multiple dialogs
         
         # Setup UI
         self.setWindowTitle("Modbus Explorer")
@@ -767,6 +768,7 @@ class MainWindow(QMainWindow):
             device_str = ", ".join(str(s) for s in settings.slave_ids)
             self.connection_label.setText(f"🟢 Connected: {settings.port} (D{device_str})")
             self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
+            self._connection_lost_dialog_shown = False  # Reset flag on successful connection
             self.speed_test_panel.set_connected(True)
             self.connect_action.setText("Disconnect")
             
@@ -792,6 +794,7 @@ class MainWindow(QMainWindow):
         # Keep the device selection so user can easily reconnect
         self.connection_label.setText("🔴 Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
+        self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
         self.speed_test_panel.set_connected(False)
         self.connect_action.setText("Connect")
         
@@ -927,7 +930,10 @@ class MainWindow(QMainWindow):
         # Keep device selection so user can easily reconnect
         self.speed_test_panel.set_connected(False)
         self._disconnect()
-        QMessageBox.warning(self, "Connection Lost", "Connection to Modbus device was lost.")
+        # Only show dialog if not already shown
+        if not self._connection_lost_dialog_shown:
+            self._connection_lost_dialog_shown = True
+            QMessageBox.warning(self, "Connection Lost", "Connection to Modbus device was lost.")
     
     def _on_write_requested(self, register, value) -> None:
         """Handle write request from table."""

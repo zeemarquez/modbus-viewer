@@ -83,6 +83,7 @@ class ViewerWindow(QMainWindow):
         
         self.is_admin = False  # Start as user by default
         self._found_devices = []
+        self._connection_lost_dialog_shown = False  # Flag to prevent multiple dialogs
         
         # Clean devices on startup - User must scan first
         self.config.slave_ids = []
@@ -170,8 +171,14 @@ class ViewerWindow(QMainWindow):
         # Plot Dock
         self.plot_dock = QDockWidget("Plot", self)
         self.plot_dock.setObjectName("PlotDock")
+        # Wrap plot view in container with margin for visual spacing
+        plot_container = QWidget()
+        plot_container_layout = QVBoxLayout(plot_container)
+        plot_container_layout.setContentsMargins(10, 10, 10, 10)  # 10px margin
+        plot_container_layout.setSpacing(0)
         self.plot_view = ViewerPlotView()
-        self.plot_dock.setWidget(self.plot_view)
+        plot_container_layout.addWidget(self.plot_view)
+        self.plot_dock.setWidget(plot_container)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.plot_dock)
         
         # Variables Dock
@@ -238,8 +245,8 @@ class ViewerWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         
-        self.connection_label = QLabel("?? Disconnected")
-        self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
+        self.connection_label = QLabel(f'<span style="color: {COLORS["error"]};">●</span> Disconnected')
+        self.connection_label.setStyleSheet("font-weight: 500;")
         self.statusbar.addWidget(self.connection_label)
         
         self.poll_label = QLabel("Poll: --")
@@ -571,8 +578,9 @@ class ViewerWindow(QMainWindow):
                 stop_bits=self.config.stop_bits,
                 timeout=self.config.timeout
             )
-            self.connection_label.setText(f"?? Connected: {port}")
-            self.connection_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: 500;")
+            self.connection_label.setText(f'<span style="color: {COLORS["success"]};">●</span> Connected: {port}')
+            self.connection_label.setStyleSheet("font-weight: 500;")
+            self._connection_lost_dialog_shown = False  # Reset flag on successful connection
             self._sync_registers()
             self.data_engine.start()
             # Update recording panel connection state
@@ -585,8 +593,9 @@ class ViewerWindow(QMainWindow):
     def _disconnect(self):
         self.data_engine.stop()
         self.modbus.disconnect()
-        self.connection_label.setText("?? Disconnected")
-        self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
+        self.connection_label.setText(f'<span style="color: {COLORS["error"]};">●</span> Disconnected')
+        self.connection_label.setStyleSheet("font-weight: 500;")
+        self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
         # Update recording panel connection state
         self.recording_panel.set_connection_state(False)
 
@@ -838,7 +847,10 @@ class ViewerWindow(QMainWindow):
     def _on_connection_lost(self):
         self.connect_action.setChecked(False)
         self._disconnect()
-        QMessageBox.warning(self, "Connection Lost", "Modbus connection lost.")
+        # Only show dialog if not already shown
+        if not self._connection_lost_dialog_shown:
+            self._connection_lost_dialog_shown = True
+            QMessageBox.warning(self, "Connection Lost", "Modbus connection lost.")
         # Connection state already updated by _disconnect()
 
     def _update_status(self):

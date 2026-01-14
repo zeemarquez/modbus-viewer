@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QFontComboBox, QSpinBox, QComboBox, QToolButton,
     QSlider, QGroupBox, QDialogButtonBox, QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QSize
 from PySide6.QtGui import QColor, QBrush, QPixmap, QAction
 import pyqtgraph as pg
 from src.ui.table_view import TableView
@@ -371,7 +371,15 @@ class ViewerPlotView(PlotView):
                     self.legend = None
 
     def update_style(self):
+        # Remove margin - it reduces available geometry. Use border only.
+        # The margin will be handled by the container widget in viewer_window
         self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
+        layout = self.layout()
+        if layout and layout.count() > 0:
+            toolbar_item = layout.itemAt(0)
+            if toolbar_item and toolbar_item.layout():
+                toolbar = toolbar_item.layout()
+                toolbar.setContentsMargins(4, 4, 4, 4)
         if hasattr(self.plot_widget, 'setBackground'):
              self.plot_widget.setBackground(COLORS['bg_widget'])
 
