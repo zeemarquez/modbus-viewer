@@ -74,6 +74,7 @@ class ViewerConfig:
     # Custom Panels
     text_panels: List[dict] = field(default_factory=list)
     image_panels: List[dict] = field(default_factory=list)
+    variable_panels: List[dict] = field(default_factory=list)
     
     def to_dict(self) -> dict:
         return {
@@ -112,6 +113,7 @@ class ViewerConfig:
             "recording_max_speed": self.recording_max_speed,
             "text_panels": self.text_panels,
             "image_panels": self.image_panels,
+            "variable_panels": self.variable_panels,
         }
     
     @classmethod
@@ -152,6 +154,7 @@ class ViewerConfig:
             recording_max_speed=data.get("recording_max_speed", False),
             text_panels=data.get("text_panels", []),
             image_panels=data.get("image_panels", []),
+            variable_panels=data.get("variable_panels", []),
         )
     
     def save(self, path: str = None) -> None:

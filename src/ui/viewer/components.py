@@ -1,5 +1,6 @@
 import os
 import csv
+import re
 from datetime import datetime
 from typing import Dict, List
 from PySide6.QtWidgets import (
@@ -7,7 +8,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QMenu, QCheckBox, QWidget, QAbstractItemView, QLabel,
     QDialog, QProgressBar, QPushButton, QLineEdit, QHBoxLayout,
     QSizePolicy, QFileDialog, QFontDialog, QColorDialog,
-    QFontComboBox, QSpinBox, QComboBox, QToolButton,
+    QFontComboBox, QSpinBox, QComboBox, QToolButton, QPlainTextEdit,
     QSlider, QGroupBox, QDialogButtonBox, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QSize
@@ -19,7 +20,8 @@ from src.ui.plot_view import PlotView
 from src.ui.variables_panel import VariablesPanel
 from src.ui.bits_panel import BitsPanel
 from src.ui.scan_dialog import ScanWorker
-from src.models.register import AccessMode
+from src.models.register import AccessMode, Register
+from src.models.variable import Variable
 from src.ui.styles import COLORS
 from src.utils.resources_manager import copy_image_to_resources, resolve_resource_path, migrate_absolute_path_to_relative
 
@@ -1200,6 +1202,452 @@ class ViewerTextPanel(QWidget):
         if not dialog.exec():
             # Restoration is handled by dialog.reject()
             pass
+
+
+class VariableEditDialog(QDialog):
+    """Dialog for editing variable panel (expression + style)."""
+
+    def __init__(self, target_panel: "ViewerVariablePanel", parent=None):
+        super().__init__(parent)
+        self.target_panel = target_panel
+
+        self.setWindowTitle("Edit Variable Panel")
+        self.setMinimumWidth(580)
+
+        # Store original state for cancel
+        self._original_settings = target_panel.get_settings()
+
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+
+        # Expression input + insert button
+        expr_row = QHBoxLayout()
+        expr_row.setSpacing(12)
+
+        expr_col = QVBoxLayout()
+        expr_col.setSpacing(6)
+        expr_col.addWidget(QLabel("Expression (f-string inner text):"))
+
+        self.expression_edit = QPlainTextEdit()
+        self.expression_edit.setFixedHeight(70)
+        self.expression_edit.setPlaceholderText(
+            "Example: Value 1: {D1.R1:.2f} mm | Value 2: {D1.R2:.2f} mm"
+        )
+        self.expression_edit.setPlainText(self._original_settings.get("expression_str", "") or "")
+        expr_col.addWidget(self.expression_edit, 1)
+
+        expr_row.addLayout(expr_col, stretch=1)
+
+        insert_btn = QPushButton("Insert Register/Variable")
+        insert_btn.setFixedWidth(190)
+        insert_btn.clicked.connect(self._open_insert_dialog)
+        expr_row.addWidget(insert_btn)
+
+        root.addLayout(expr_row)
+
+        # Font Options (copied approach from TextEditDialog for similarity)
+        font_box = QHBoxLayout()
+
+        v_font = QVBoxLayout()
+        v_font.addWidget(QLabel("Font Family:"))
+        self.font_combo = QFontComboBox()
+        self.font_combo.setCurrentFont(
+            self._original_settings.get("font", self.target_panel.display_label.font())
+        )
+        self.font_combo.currentFontChanged.connect(self._update_style_and_preview)
+        v_font.addWidget(self.font_combo)
+        font_box.addLayout(v_font, 3)
+
+        v_size = QVBoxLayout()
+        v_size.addWidget(QLabel("Size:"))
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(1, 200)
+        orig_font = self._original_settings.get("font")
+        curr_size = orig_font.pointSize() if orig_font else self.target_panel.display_label.font().pointSize()
+        self.size_spin.setValue(curr_size if curr_size > 0 else 14)
+        self.size_spin.valueChanged.connect(self._update_style_and_preview)
+        v_size.addWidget(self.size_spin)
+        font_box.addLayout(v_size, 1)
+
+        v_style = QVBoxLayout()
+        v_style.addWidget(QLabel("Style:"))
+        self.bold_check = QCheckBox("Bold")
+        self.bold_check.setChecked(self._original_settings.get("bold", self.target_panel.display_label.font().bold()))
+        self.bold_check.stateChanged.connect(self._update_style_and_preview)
+        self.italic_check = QCheckBox("Italic")
+        self.italic_check.setChecked(self._original_settings.get("italic", self.target_panel.display_label.font().italic()))
+        self.italic_check.stateChanged.connect(self._update_style_and_preview)
+        v_style.addWidget(self.bold_check)
+        v_style.addWidget(self.italic_check)
+        font_box.addLayout(v_style, 1)
+
+        root.addLayout(font_box)
+
+        # Alignment Option
+        v_align = QVBoxLayout()
+        v_align.setSpacing(6)
+        v_align.addWidget(QLabel("Alignment:"))
+        self.align_combo = QComboBox()
+        self.align_combo.addItems(["Left", "Center", "Right"])
+
+        orig_alignment = self._original_settings.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
+        if orig_alignment == int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter):
+            self.align_combo.setCurrentIndex(0)
+        elif orig_alignment == int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter):
+            self.align_combo.setCurrentIndex(2)
+        else:
+            self.align_combo.setCurrentIndex(1)
+
+        self.align_combo.currentIndexChanged.connect(self._update_style_and_preview)
+        v_align.addWidget(self.align_combo)
+        root.addLayout(v_align)
+
+        # Color picker
+        root.addWidget(QLabel("Color:"))
+        self.color_picker = QColorDialog()
+        self.color_picker.setOptions(
+            QColorDialog.ColorDialogOption.DontUseNativeDialog | QColorDialog.ColorDialogOption.NoButtons
+        )
+        self.color_picker.setCurrentColor(self._original_settings.get("color", "#000000"))
+        self.color_picker.currentColorChanged.connect(self._update_style_and_preview)
+        root.addWidget(self.color_picker)
+
+        # Buttons
+        actions = QHBoxLayout()
+        ok_btn = QPushButton("Apply")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        actions.addStretch()
+        actions.addWidget(ok_btn)
+        actions.addWidget(cancel_btn)
+        root.addLayout(actions)
+
+        # Live preview updates
+        self.expression_edit.textChanged.connect(self._update_style_and_preview)
+
+        self._update_style_and_preview()
+
+    def _open_insert_dialog(self) -> None:
+        dialog = SourceInsertDialog(
+            registers=self.target_panel.get_live_registers(),
+            variables=self.target_panel.get_live_variables(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        token = dialog.get_insert_text()
+        if not token:
+            return
+
+        cursor = self.expression_edit.textCursor()
+        cursor.insertText(token)
+        self.expression_edit.setTextCursor(cursor)
+        self.expression_edit.setFocus()
+
+    def _update_style_and_preview(self) -> None:
+        """Apply style to the label, and update its preview text."""
+        font_family = self.font_combo.currentFont().family()
+        font_size = self.size_spin.value()
+        is_bold = self.bold_check.isChecked()
+        is_italic = self.italic_check.isChecked()
+        color_value = self.color_picker.currentColor().name()
+
+        style = f"""
+            QLabel {{
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                font-weight: {"bold" if is_bold else "normal"};
+                font-style: {"italic" if is_italic else "normal"};
+                color: {color_value};
+                padding: 10px;
+                background: transparent;
+            }}
+        """
+        self.target_panel.display_label.setStyleSheet(style)
+
+        align_text = self.align_combo.currentText()
+        if align_text == "Left":
+            self.target_panel.display_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        elif align_text == "Right":
+            self.target_panel.display_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            self.target_panel.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        expr = self.expression_edit.toPlainText().strip()
+        preview = self.target_panel.render_expression(expr)
+        self.target_panel.display_label.setText(preview)
+
+    def reject(self) -> None:
+        self.target_panel.set_settings(self._original_settings)
+        super().reject()
+
+    def accept(self) -> None:
+        settings = self.target_panel.get_settings()
+        settings["expression_str"] = self.expression_edit.toPlainText().strip()
+        settings.update(self.target_panel.extract_label_style(self.target_panel.display_label))
+        self.target_panel.set_settings(settings)
+        super().accept()
+
+
+class ViewerVariablePanel(QWidget):
+    """Simple panel for displaying real-time register/variable values."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_admin = False
+        self.config = None
+
+        self._live_registers: List[Register] = []
+        self._live_variables: List[Variable] = []
+        self._register_map: Dict[str, Register] = {}
+        self._variable_map: Dict[str, Variable] = {}
+
+        # Expression stored as the f-string *inner text* (no leading f/no quotes).
+        # Example input: Value 1: {D1.R1:.2f} mm
+        self.expression_str: str = ""
+
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+
+        self.display_label = QLabel("---")
+        self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.display_label.setWordWrap(True)
+        self.display_label.setStyleSheet("font-size: 14pt; padding: 10px; background: transparent;")
+        self.layout.addWidget(self.display_label, 1)
+
+    def set_admin_mode(self, is_admin: bool, config=None):
+        self.is_admin = is_admin
+        self.config = config
+        if not self.expression_str:
+            self.display_label.setText("Double-click to edit (Admin)" if is_admin else "---")
+
+    def get_live_registers(self) -> List[Register]:
+        return list(self._live_registers)
+
+    def get_live_variables(self) -> List[Variable]:
+        return list(self._live_variables)
+
+    def set_live_data(self, registers: List[Register], variables: List[Variable]) -> None:
+        """Provide live register + variable objects (data engine updates them in-place)."""
+        self._live_registers = registers or []
+        self._live_variables = variables or []
+        self._register_map = {r.designator: r for r in self._live_registers if r.designator}
+        self._variable_map = {v.designator: v for v in self._live_variables if v.designator}
+
+        # If the panel has no expression yet, seed with a reasonable default
+        if not self.expression_str:
+            if self._live_registers:
+                regs_sorted = sorted(self._live_registers, key=lambda r: (r.slave_id or 0, r.address))
+                first = regs_sorted[0]
+                if first and first.designator:
+                    self.expression_str = f"{{{first.designator}:.2f}}"
+            elif self._live_variables:
+                vars_sorted = sorted(self._live_variables, key=lambda v: (v.slave_id if v.slave_id is not None else -1, v.name))
+                first_v = vars_sorted[0]
+                if first_v and first_v.designator:
+                    self.expression_str = f"{{{first_v.designator}:.2f}}"
+
+        self.update_values()
+
+    def _lookup_token_value(self, token: str) -> object | None:
+        token = (token or "").strip()
+        if not token:
+            return None
+
+        # Register designator: D<id>.R<addr>
+        reg = self._register_map.get(token)
+        if reg:
+            return reg.scaled_value if reg.scaled_value is not None else reg.raw_value
+
+        # Variable designator: global -> name, non-global -> D<id>.<name>
+        var = self._variable_map.get(token)
+        if var:
+            return var.value
+
+        return None
+
+    def render_expression(self, expression_inner: str | None) -> str:
+        """Render the inner text of an f-string using {D1.R1} / {var} placeholders."""
+        expr = (expression_inner or "").strip()
+        if not expr:
+            return "---"
+
+        # Replace every { ... } token.
+        # Inside braces we support: TOKEN[:format_spec]
+        parts: List[str] = []
+        last = 0
+        for m in re.finditer(r'\{([^{}]+)\}', expr):
+            parts.append(expr[last:m.start()])
+            inner = m.group(1).strip()
+
+            token, _, fmt_spec = inner.partition(":")
+            token = token.strip()
+            fmt_spec = fmt_spec.strip() if fmt_spec else ""
+
+            value = self._lookup_token_value(token)
+            if value is None:
+                parts.append("---")
+            elif fmt_spec:
+                try:
+                    parts.append(format(float(value), fmt_spec))
+                except Exception:
+                    parts.append("---")
+            else:
+                parts.append(str(value))
+
+            last = m.end()
+
+        parts.append(expr[last:])
+        return "".join(parts)
+
+    def update_values(self) -> None:
+        if not self._live_registers and not self._live_variables:
+            self.display_label.setText("Double-click to edit (Admin)" if self.is_admin else "---")
+            return
+        self.display_label.setText(self.render_expression(self.expression_str))
+
+    def extract_label_style(self, label: QLabel) -> dict:
+        color = QColor(label.palette().color(label.foregroundRole()).name())
+
+        if "color:" in (label.styleSheet() or ""):
+            match = re.search(r"color:\\s*(#[0-9a-fA-F]+)", label.styleSheet() or "")
+            if match:
+                color = QColor(match.group(1))
+
+        return {
+            "font_family": label.font().family(),
+            "font_size": label.font().pointSize() if label.font().pointSize() > 0 else 14,
+            "bold": label.font().bold(),
+            "italic": label.font().italic(),
+            "color": color.name(),
+            "alignment": int(label.alignment()),
+        }
+
+    def get_settings(self) -> dict:
+        return {
+            "expression_str": self.expression_str,
+            **self.extract_label_style(self.display_label),
+        }
+
+    def _apply_label_style(self, style: dict) -> None:
+        font_family = style.get("font_family", self.display_label.font().family())
+        font_size = style.get("font_size", self.display_label.font().pointSize() or 14)
+        is_bold = bool(style.get("bold", self.display_label.font().bold()))
+        is_italic = bool(style.get("italic", self.display_label.font().italic()))
+        color = style.get("color", "#000000")
+        alignment = style.get("alignment", int(Qt.AlignmentFlag.AlignCenter))
+
+        css = f"""
+            QLabel {{
+                font-family: "{font_family}";
+                font-size: {font_size}pt;
+                font-weight: {"bold" if is_bold else "normal"};
+                font-style: {"italic" if is_italic else "normal"};
+                color: {color};
+                padding: 10px;
+                background: transparent;
+            }}
+        """
+        self.display_label.setStyleSheet(css)
+
+        if isinstance(alignment, int):
+            self.display_label.setAlignment(Qt.Alignment(alignment))
+        else:
+            self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def set_settings(self, settings: dict) -> None:
+        # Expression
+        self.expression_str = (settings.get("expression_str") or "").strip()
+
+        # Style
+        style = {
+            "font_family": settings.get("font_family"),
+            "font_size": settings.get("font_size"),
+            "bold": settings.get("bold"),
+            "italic": settings.get("italic"),
+            "color": settings.get("color"),
+            "alignment": settings.get("alignment"),
+        }
+        style = {k: v for k, v in style.items() if v is not None}
+        self._apply_label_style(style)
+
+        # Update label text from current live data
+        self.update_values()
+
+    def mouseDoubleClickEvent(self, event):
+        if not self.is_admin:
+            return super().mouseDoubleClickEvent(event)
+
+        dialog = VariableEditDialog(self, self)
+        dialog.exec()
+
+
+class SourceInsertDialog(QDialog):
+    """Dialog to insert {D1.R1} / {var} placeholders into an expression."""
+
+    def __init__(self, registers: List[Register], variables: List[Variable], parent=None):
+        super().__init__(parent)
+
+        self._registers = registers or []
+        self._variables = variables or []
+        self._selected_designator: str | None = None
+
+        self.setWindowTitle("Insert Register/Variable")
+        self.setMinimumWidth(420)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        info = QLabel("Select a register or variable to insert:")
+        info.setStyleSheet("color: #757575; font-size: 11px;")
+        layout.addWidget(info)
+
+        self.combo = QComboBox()
+        self.combo.setMinimumWidth(320)
+        layout.addWidget(self.combo)
+
+        # Build combined list
+        self.combo.addItem("---", None)
+
+        regs_sorted = sorted(self._registers, key=lambda r: (r.slave_id or 0, r.address))
+        for r in regs_sorted:
+            if not r.designator:
+                continue
+            disp = r.label if r.label else f"R{r.address}"
+            self.combo.addItem(f"Register: {disp} ({r.designator})", r.designator)
+
+        vars_sorted = sorted(self._variables, key=lambda v: (v.slave_id if v.slave_id is not None else -1, v.name))
+        for v in vars_sorted:
+            if not v.designator:
+                continue
+            disp = v.label if v.label else v.name
+            self.combo.addItem(f"Variable: {disp} ({v.designator})", v.designator)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        self.combo.currentIndexChanged.connect(self._on_select_changed)
+        self._on_select_changed()
+
+    def _on_select_changed(self):
+        data = self.combo.currentData()
+        self._selected_designator = data if isinstance(data, str) else None
+
+    def get_insert_text(self) -> str:
+        """Insert with a default float format (can be edited by the user)."""
+        if not self._selected_designator:
+            return ""
+        return f"{{{self._selected_designator}:.2f}}"
 
 class ImageSettingsDialog(QDialog):
     """Dialog for image panel settings (image, margin, alignment)."""

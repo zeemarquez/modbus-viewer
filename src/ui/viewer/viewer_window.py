@@ -27,7 +27,7 @@ from src.utils.resources_manager import (
 from src.ui.viewer.components import (
     ViewerTableView, ViewerPlotView, ViewerVariablesPanel, ViewerBitsPanel,
     MinimalScanDialog, ViewerTextPanel, ViewerImagePanel, ConnectionPanel,
-    RecordingPanel
+    RecordingPanel, ViewerVariablePanel
 )
 from src.ui.viewer.calibration_dialog import CalibrationDialog
 from src.ui.viewer.window_properties_dialog import WindowPropertiesDialog
@@ -101,6 +101,9 @@ class ViewerWindow(QMainWindow):
         # UI Components
         self._setup_ui()
         self._setup_connections()
+
+        # Track dynamic variable panels for live updates
+        self._variable_panels: list[ViewerVariablePanel] = []
         
         # Load settings (geometry and layout)
         self._load_settings()
@@ -335,6 +338,9 @@ class ViewerWindow(QMainWindow):
             
             image_action = self.insert_menu.addAction("Image Panel")
             image_action.triggered.connect(self._add_image_panel)
+
+            variable_action = self.insert_menu.addAction("Variable Panel")
+            variable_action.triggered.connect(self._add_variable_panel)
 
     def _update_themes_menu(self):
         """Update Themes menu based on admin state."""
@@ -681,12 +687,13 @@ class ViewerWindow(QMainWindow):
             self.connect_action.setChecked(False)
             self.recording_panel.set_connection_state(False)
 
-    def _disconnect(self):
+    def _disconnect(self, reset_connection_lost_dialog: bool = True):
         self.data_engine.stop()
         self.modbus.disconnect()
         self.connection_label.setText(f'<span style="color: {COLORS["error"]};">●</span> Disconnected')
         self.connection_label.setStyleSheet("font-weight: 500;")
-        self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
+        if reset_connection_lost_dialog:
+            self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
         # Update recording panel connection state
         self.recording_panel.set_connection_state(False)
 
@@ -705,6 +712,8 @@ class ViewerWindow(QMainWindow):
         self.variables_panel.set_registers(live_registers)
         self.variables_panel.set_variables(self.project.variables)
         self.variables_panel.set_slave_ids(slave_ids)
+        # Enable buffered expression functions (AVG/STD) using DataEngine history.
+        self.variables_panel.set_history_getter(self.data_engine.get_history_values)
         
         # Sync Bits
         self.bits_panel.set_registers(self.project.registers)
@@ -722,6 +731,13 @@ class ViewerWindow(QMainWindow):
         # Sync Recording panel
         self.recording_panel.set_registers(live_registers)
         self.recording_panel.set_variables(live_variables)
+
+        # Sync variable panel docks with live data (data engine updates these objects in-place)
+        for panel in list(getattr(self, "_variable_panels", [])):
+            try:
+                panel.set_live_data(live_registers, live_variables)
+            except RuntimeError:
+                pass
 
     def _on_admin_clicked(self):
         dialog = AdminLoginDialog(self.config.admin_password, self)
@@ -931,16 +947,26 @@ class ViewerWindow(QMainWindow):
         self.bits_panel.update_values()
         self.plot_view.update_plot(self.data_engine)
 
+        # Update any inserted variable panels
+        for panel in list(getattr(self, "_variable_panels", [])):
+            try:
+                panel.update_values()
+            except RuntimeError:
+                # Panel may have been deleted during dock closing
+                pass
+
     def _on_error(self, msg):
         self.statusbar.showMessage(f"Error: {msg}", 5000)
 
     def _on_connection_lost(self):
         self.connect_action.setChecked(False)
-        self._disconnect()
         # Only show dialog if not already shown
         if not self._connection_lost_dialog_shown:
-            self._connection_lost_dialog_shown = True
-            QMessageBox.warning(self, "Connection Lost", "Modbus connection lost.")
+            self._connection_lost_dialog_shown = True  # Set before disconnect to avoid races
+            self._disconnect(reset_connection_lost_dialog=False)
+            self._show_single_error_dialog("Connection Lost", "Modbus connection lost.")
+        else:
+            self._disconnect(reset_connection_lost_dialog=False)
         # Connection state already updated by _disconnect()
 
     def _update_status(self):
@@ -983,6 +1009,26 @@ class ViewerWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
         self._update_ui_state()
 
+    def _add_variable_panel(self, settings=None, object_name=None):
+        """Add a new variable panel dock."""
+        panel = ViewerVariablePanel()
+        if settings:
+            panel.set_settings(settings)
+        dock = QDockWidget("Variable Panel", self)
+        dock.setObjectName(object_name if object_name else f"VariablePanel_{uuid.uuid4().hex[:8]}")
+        dock.setWidget(panel)
+        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+        self._variable_panels.append(panel)
+
+        def _cleanup(_=None, p=panel):
+            if p in self._variable_panels:
+                self._variable_panels.remove(p)
+
+        dock.destroyed.connect(_cleanup)
+        self._update_ui_state()
+
     def _load_settings(self):
         """Load window geometry and dock layout."""
         # Recreate custom panels first so restoreState can find them
@@ -1005,6 +1051,10 @@ class ViewerWindow(QMainWindow):
             # Check if p_data is old format (dict with just path?) or new settings dict
             # ViewerImagePanel.set_settings handles dict with defaults
             self._add_image_panel(settings=p_data, object_name=p_data.get("object_name"))
+        
+        # Load variable panels
+        for p_data in self.config.variable_panels:
+            self._add_variable_panel(settings=p_data, object_name=p_data.get("object_name"))
         
         # Save migrated paths
         if migrated:
@@ -1029,6 +1079,7 @@ class ViewerWindow(QMainWindow):
         # Collect dynamic panels
         text_panels = []
         image_panels = []
+        variable_panels = []
         
         for dock in self.findChildren(QDockWidget):
             obj_name = dock.objectName()
@@ -1044,9 +1095,16 @@ class ViewerWindow(QMainWindow):
                     data = widget.get_settings()
                     data["object_name"] = obj_name
                     image_panels.append(data)
+            elif obj_name.startswith("VariablePanel_"):
+                widget = dock.widget()
+                if isinstance(widget, ViewerVariablePanel):
+                    data = widget.get_settings()
+                    data["object_name"] = obj_name
+                    variable_panels.append(data)
                     
         self.config.text_panels = text_panels
         self.config.image_panels = image_panels
+        self.config.variable_panels = variable_panels
 
         geom = self.saveGeometry().data()
         self.config.geometry = base64.b64encode(geom).decode('utf-8')

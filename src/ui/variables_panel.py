@@ -97,6 +97,11 @@ class VariablesPanel(QFrame):
         """Set the available registers for expressions."""
         self.register_definitions = registers
         self.evaluator.set_registers(registers)
+
+    def set_history_getter(self, getter) -> None:
+        """Provide a history resolver for buffered expression functions (AVG/STD)."""
+        # `getter` should match DataEngine.get_history_values signature.
+        self.evaluator.set_history_getter(getter)
     
     def set_variables(self, variables: List[Variable]) -> None:
         """Set the list of variable definitions."""

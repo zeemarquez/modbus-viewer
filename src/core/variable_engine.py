@@ -61,11 +61,22 @@ class VariableEvaluator:
         'log': math.log,
         'log10': math.log10,
         'exp': math.exp,
+        # Buffering functions (implemented via history in _eval_node).
+        # These are still included so the UI can discover them.
+        'avg': lambda _x, _n: float("nan"),
+        'std': lambda _x, _n: float("nan"),
     }
     
     def __init__(self):
         self._registers: List[Register] = []
         self._register_map: Dict[Tuple[int, int], Register] = {}  # (slave_id, address) -> register
+        # Optional history resolver for buffering functions.
+        # Signature: (history_key: str, limit: int) -> List[float]
+        self._history_getter: Optional[Callable[[str, int], List[float]]] = None
+
+    def set_history_getter(self, getter: Optional[Callable[[str, int], List[float]]]) -> None:
+        """Set a history resolver for buffering functions (AVG/STD)."""
+        self._history_getter = getter
     
     def set_registers(self, registers: List[Register]) -> None:
         """Set the available registers for expression evaluation."""
@@ -202,19 +213,27 @@ class VariableEvaluator:
                 raise ValueError("Only simple function calls are allowed")
             
             func_name = node.func.id
-            if func_name not in self.FUNCTIONS:
+            func_key = func_name.lower()
+
+            # Buffered functions backed by DataEngine history:
+            #   AVG(register_ref, samples)
+            #   STD(register_ref, samples)  (aliases: STDEV/STDDEV)
+            if func_key in ("avg", "average", "std", "stdev", "stddev"):
+                return self._eval_buffered_stat_call(node, func_key, variables)
+
+            if func_key not in self.FUNCTIONS:
                 raise ValueError(f"Unknown function: {func_name}")
             
             args = [self._eval_node(arg, variables) for arg in node.args]
             
             # Check for invalid function arguments
-            if func_name in ('sqrt', 'log', 'log10') and args[0] < 0:
-                raise ValueError(f"{func_name}() argument must be non-negative")
+            if func_key in ('sqrt', 'log', 'log10') and args[0] < 0:
+                raise ValueError(f"{func_key}() argument must be non-negative")
             
             try:
-                return self.FUNCTIONS[func_name](*args)
+                return self.FUNCTIONS[func_key](*args)
             except (ValueError, ZeroDivisionError) as e:
-                raise ValueError(f"Function {func_name}() error: {e}")
+                raise ValueError(f"Function {func_key}() error: {e}")
         
         elif isinstance(node, ast.IfExp):
             condition = self._eval_node(node.test, variables)
@@ -225,6 +244,60 @@ class VariableEvaluator:
         
         else:
             raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+
+    def _eval_buffered_stat_call(
+        self,
+        node: ast.Call,
+        func_key: str,
+        variables: dict,
+    ) -> float:
+        """Evaluate AVG/STD using a register history buffer.
+
+        Signature:
+          - AVG(register_ref, samples)
+          - STD(register_ref, samples)  (aliases: STDEV/STDDEV)
+        """
+        if len(node.args) != 2:
+            raise ValueError(f"{func_key.upper()} requires (register_ref, samples)")
+
+        register_arg, samples_arg = node.args
+
+        if not isinstance(register_arg, ast.Name):
+            raise ValueError(f"{func_key.upper()} first argument must be a register reference")
+
+        # Register placeholders look like: _D<sid>_R<addr>
+        reg_placeholder = register_arg.id
+        m = re.match(r"^_D(\d+)_R(\d+)$", reg_placeholder)
+        if not m:
+            raise ValueError(f"{func_key.upper()} register reference not recognized: {reg_placeholder}")
+
+        slave_id = int(m.group(1))
+        address = int(m.group(2))
+        history_key = f"D{slave_id}.R{address}"
+
+        if not isinstance(samples_arg, ast.Constant) or not isinstance(samples_arg.value, (int, float)):
+            raise ValueError(f"{func_key.upper()} samples must be a number literal")
+
+        samples = int(samples_arg.value)
+        if samples <= 0:
+            raise ValueError(f"{func_key.upper()} samples must be > 0")
+
+        # If history is not available (editor preview / validate), return a safe default.
+        if not self._history_getter:
+            return 0.0
+
+        values = self._history_getter(history_key, samples) or []
+        if not values:
+            return 0.0
+
+        mean = sum(values) / len(values)
+
+        if func_key in ("avg", "average"):
+            return mean
+
+        # Population standard deviation (ddof=0)
+        var = sum((x - mean) ** 2 for x in values) / len(values)
+        return math.sqrt(var)
     
     def validate(self, expression: str) -> Optional[str]:
         """

@@ -38,9 +38,9 @@ class ExpressionHighlighter(QSyntaxHighlighter):
         function_format.setForeground(QColor('#7b1fa2'))  # Purple
         function_format.setFontWeight(QFont.Weight.Bold)
         functions = ['abs', 'min', 'max', 'sqrt', 'round', 'int', 'float', 'pow',
-                     'sin', 'cos', 'tan', 'log', 'log10', 'exp']
+                     'sin', 'cos', 'tan', 'log', 'log10', 'exp', 'avg', 'std']
         pattern = r'\b(' + '|'.join(functions) + r')\b'
-        self._rules.append((re.compile(pattern), function_format))
+        self._rules.append((re.compile(pattern, re.IGNORECASE), function_format))
         
         # Operators
         operator_format = QTextCharFormat()

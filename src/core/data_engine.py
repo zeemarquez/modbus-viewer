@@ -48,6 +48,8 @@ class DataEngine(QObject):
         self.registers: List[Register] = []
         self.variables: List[Variable] = []
         self.variable_evaluator = VariableEvaluator()
+        # Enable buffering-based functions (AVG/STD) in variable expressions.
+        self.variable_evaluator.set_history_getter(self.get_history_values)
         
         # Polling state
         self._poll_interval = 100  # ms
@@ -443,6 +445,30 @@ class DataEngine(QObject):
                     values.append(dp.value)
         
         return times, values
+
+    def get_history_values(self, key: str, limit: int) -> List[float]:
+        """Get last `limit` history values for `key`."""
+        if limit <= 0:
+            return []
+
+        if key not in self._history:
+            return []
+
+        # Avoid deadlocks if called while `_write_lock` is already held.
+        if self._write_lock.locked():
+            history = list(self._history[key])
+        else:
+            with self._write_lock:
+                history = list(self._history[key])
+
+        if not history:
+            return []
+
+        if len(history) > limit:
+            history = history[-limit:]
+
+        # Keep only numeric values (DataPoint.value is expected numeric).
+        return [dp.value for dp in history if dp.value is not None]
 
     def write_register(self, register: Register, value: float) -> bool:
         """Write value to register, with locking to prevent thread conflicts."""

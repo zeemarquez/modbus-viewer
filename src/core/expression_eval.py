@@ -150,11 +150,12 @@ class ExpressionEvaluator:
                 raise ValueError("Only simple function calls are allowed")
             
             func_name = node.func.id
-            if func_name not in self.FUNCTIONS:
+            func_key = func_name.lower()
+            if func_key not in self.FUNCTIONS:
                 raise ValueError(f"Unknown function: {func_name}")
             
             args = [self._eval_node(arg, variables) for arg in node.args]
-            return self.FUNCTIONS[func_name](*args)
+            return self.FUNCTIONS[func_key](*args)
         
         elif isinstance(node, ast.IfExp):
             # Ternary expression: a if condition else b

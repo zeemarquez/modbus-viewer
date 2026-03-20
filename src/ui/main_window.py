@@ -699,6 +699,8 @@ class MainWindow(QMainWindow):
         self.variables_panel.set_registers(live_registers)
         self.variables_panel.set_variables(self.project.variables)
         self.variables_panel.set_slave_ids(slave_ids)
+        # Enable buffered expression functions (AVG/STD) using DataEngine history.
+        self.variables_panel.set_history_getter(self.data_engine.get_history_values)
         
         # Bits panel needs live registers for value lookup
         self.bits_panel.set_slave_ids(slave_ids, live_registers)
@@ -787,14 +789,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Connection Error", str(e))
             self.connect_action.setChecked(False)
     
-    def _disconnect(self) -> None:
+    def _disconnect(self, reset_connection_lost_dialog: bool = True) -> None:
         """Disconnect from Modbus devices."""
         self.data_engine.stop()
         self.modbus.disconnect()
         # Keep the device selection so user can easily reconnect
         self.connection_label.setText("🔴 Disconnected")
         self.connection_label.setStyleSheet(f"color: {COLORS['error']}; font-weight: 500;")
-        self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
+        if reset_connection_lost_dialog:
+            self._connection_lost_dialog_shown = False  # Reset flag on manual disconnect
         self.speed_test_panel.set_connected(False)
         self.connect_action.setText("Connect")
         
@@ -929,11 +932,13 @@ class MainWindow(QMainWindow):
         self.connect_action.setText("Connect")
         # Keep device selection so user can easily reconnect
         self.speed_test_panel.set_connected(False)
-        self._disconnect()
         # Only show dialog if not already shown
         if not self._connection_lost_dialog_shown:
-            self._connection_lost_dialog_shown = True
+            self._connection_lost_dialog_shown = True  # Set before disconnect to avoid races
+            self._disconnect(reset_connection_lost_dialog=False)
             QMessageBox.warning(self, "Connection Lost", "Connection to Modbus device was lost.")
+        else:
+            self._disconnect(reset_connection_lost_dialog=False)
     
     def _on_write_requested(self, register, value) -> None:
         """Handle write request from table."""
