@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QSlider, QGroupBox, QDialogButtonBox, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QTimer, QSize
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QBrush, QPixmap, QAction
 import pyqtgraph as pg
 from src.ui.table_view import TableView
@@ -263,6 +264,7 @@ class ViewerPlotView(PlotView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._add_export_button()
+        self._plot_export_in_progress = False
 
     def _add_export_button(self):
         self.export_btn = QPushButton("Export")
@@ -285,7 +287,11 @@ class ViewerPlotView(PlotView):
 
     def _export_data(self):
         """Export current plot data to CSV."""
+        if self._plot_export_in_progress:
+            return
+        self._plot_export_in_progress = True
         if not self._plot_items:
+            self._plot_export_in_progress = False
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -296,6 +302,7 @@ class ViewerPlotView(PlotView):
         )
         
         if not file_path:
+            self._plot_export_in_progress = False
             return
             
         try:
@@ -335,6 +342,8 @@ class ViewerPlotView(PlotView):
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
+        finally:
+            self._plot_export_in_progress = False
 
     
     def set_admin_mode(self, is_admin: bool, config=None):
@@ -1684,15 +1693,22 @@ class ConnectionPanel(QWidget):
 class RecordingConfigurationDialog(QDialog):
     """Dialog for selecting variables to record."""
     
-    def __init__(self, registers: list, variables: list, 
-                 selected_registers: list = None, selected_variables: list = None,
-                 parent=None):
+    def __init__(
+        self,
+        registers: list,
+        variables: list,
+        selected_registers: list = None,
+        selected_variables: list = None,
+        selected_max_speed: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         
         self.registers = registers or []
         self.variables = variables or []
         self.selected_registers = selected_registers or []
         self.selected_variables = selected_variables or []
+        self.selected_max_speed = selected_max_speed
         
         self._register_checkbox_map: Dict[tuple, QCheckBox] = {}  # (address, label) -> checkbox
         self._variable_checkbox_map: Dict[str, QCheckBox] = {}   # name -> checkbox
@@ -1796,6 +1812,17 @@ class RecordingConfigurationDialog(QDialog):
         selection_layout.addLayout(var_section, stretch=1)
         
         main_layout.addWidget(selection_group, stretch=1)
+
+        # Recording speed options
+        speed_group = QGroupBox("Recording Options")
+        speed_layout = QVBoxLayout(speed_group)
+        self.max_speed_checkbox = QCheckBox("Max recording speed")
+        self.max_speed_checkbox.setToolTip(
+            "Pause non-recording registers and plotting/buffering during recording."
+        )
+        self.max_speed_checkbox.setChecked(self.selected_max_speed)
+        speed_layout.addWidget(self.max_speed_checkbox)
+        main_layout.addWidget(speed_group)
         
         # Dialog buttons
         button_box = QDialogButtonBox(
@@ -1907,6 +1934,7 @@ class RecordingConfigurationDialog(QDialog):
         return {
             'selected_registers': list(set(selected_registers)),
             'selected_variables': list(set(selected_variables)),
+            'max_speed': self.max_speed_checkbox.isChecked(),
         }
 
 class RecordingPanel(QWidget):
@@ -1922,15 +1950,23 @@ class RecordingPanel(QWidget):
         
         # Recording state
         self._is_recording = False
-        self._recorded_data = {}  # designator -> list of (timestamp, value)
         self._selected_registers = []
         self._selected_variables = []
+        self._max_recording_speed = False
         
         # Pulsing animation
         self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._update_pulse)
         self._pulse_alpha = 0.0
         self._pulse_direction = 1
+
+        # Recording time tracking
+        self._record_time_timer = QTimer(self)
+        self._record_time_timer.timeout.connect(self._update_record_time_label)
+        self._record_start_dt = None
+
+        # Guard to prevent stacked export dialogs/errors
+        self._export_in_progress = False
         
         self._setup_ui()
     
@@ -1949,24 +1985,31 @@ class RecordingPanel(QWidget):
         layout.addWidget(self.configure_btn)
         
         # Start/Stop toggle button (play icon slightly bigger)
-        self.record_btn = QPushButton("▶")
+        self.record_btn = QPushButton("●")
         self.record_btn.setFixedSize(32, 32)
         self.record_btn.setCheckable(True)
         self.record_btn.setToolTip("Start/Stop Recording")
-        self.record_btn.setStyleSheet("font-size: 14px;")  # Make icon slightly bigger
+        self.record_btn.setStyleSheet("font-size: 16px; color: #c62828; padding-bottom: 6px;")  # Red circle (record icon)
         self.record_btn.toggled.connect(self._on_record_toggled)
         self.record_btn.setEnabled(False)  # Disabled by default until connected
         layout.addWidget(self.record_btn)
         
         layout.addStretch()
         
-        # Export button
-        self.export_btn = QPushButton("Export")
-        self.export_btn.setFixedWidth(60)
-        self.export_btn.setFixedHeight(32)
-        self.export_btn.setToolTip("Export Recorded Data to CSV")
-        self.export_btn.clicked.connect(self._export_data)
-        layout.addWidget(self.export_btn)
+        # Recording elapsed time label (replaces export button)
+        self.elapsed_label = QLabel("00:00.0")
+        self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.elapsed_label.setFixedWidth(90)
+        # Match the recording button height and rounded shape.
+        self.elapsed_label.setFixedHeight(32)
+        radius = 16  # half of 32px height
+        self.elapsed_label.setStyleSheet(
+            f"font-size: 12px; font-weight: 600; color: #6b6b6b;"
+            f"border-radius: {radius}px;"
+            f"background-color: rgba(0, 0, 0, 0.06);"
+            f"border: 1px solid {COLORS.get('border', '#444')};"
+        )
+        layout.addWidget(self.elapsed_label)
     
     def set_admin_mode(self, is_admin: bool, config=None):
         self.is_admin = is_admin
@@ -1976,6 +2019,7 @@ class RecordingPanel(QWidget):
         if self.config:
             self._selected_registers = self.config.recording_registers.copy()
             self._selected_variables = self.config.recording_variables.copy()
+            self._max_recording_speed = self.config.recording_max_speed
     
     def update_style(self):
         self.setStyleSheet(f"border: 1px solid {COLORS['border']}; background-color: {COLORS['bg_widget']};")
@@ -1989,8 +2033,10 @@ class RecordingPanel(QWidget):
         self.record_btn.setEnabled(is_connected)
         if not is_connected and self._is_recording:
             # Stop recording if connection is lost
+            self.record_btn.blockSignals(True)
             self.record_btn.setChecked(False)
-            self._stop_recording()
+            self.record_btn.blockSignals(False)
+            self._stop_recording(reason="disconnect")
     
     def set_registers(self, registers: list):
         """Set available registers."""
@@ -2014,6 +2060,7 @@ class RecordingPanel(QWidget):
             variables=visible_vars,
             selected_registers=self._selected_registers,
             selected_variables=self._selected_variables,
+            selected_max_speed=self._max_recording_speed,
             parent=self
         )
         
@@ -2021,11 +2068,13 @@ class RecordingPanel(QWidget):
             options = dialog.get_selected()
             self._selected_registers = options['selected_registers']
             self._selected_variables = options['selected_variables']
+            self._max_recording_speed = options.get('max_speed', False)
             
             # Save to config
             if self.config:
                 self.config.recording_registers = self._selected_registers.copy()
                 self.config.recording_variables = self._selected_variables.copy()
+                self.config.recording_max_speed = self._max_recording_speed
                 self.config.save()
     
     def _on_record_toggled(self, checked: bool):
@@ -2033,7 +2082,7 @@ class RecordingPanel(QWidget):
         if checked:
             self._start_recording()
         else:
-            self._stop_recording()
+            self._stop_recording(reason="user")
     
     def _start_recording(self):
         """Start recording data."""
@@ -2042,17 +2091,35 @@ class RecordingPanel(QWidget):
             QMessageBox.warning(self, "No Variables Selected", "Please configure recording variables first.")
             self.record_btn.setChecked(False)
             return
+        if not self.data_engine:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Data Engine", "Recording is unavailable until the connection is active.")
+            self.record_btn.setChecked(False)
+            return
         
-        # Clear previous recording data
-        self._recorded_data = {}
-        for designator in self._selected_registers + self._selected_variables:
-            self._recorded_data[designator] = []
+        # Clear previous recording data and enable high-speed recording
+        self.data_engine.start_recording(
+            self._selected_registers,
+            self._selected_variables,
+            max_speed=self._max_recording_speed,
+        )
         
         self._is_recording = True
         self.record_btn.setText("■")
         self.record_btn.setToolTip("Stop Recording")
-        # Keep the bigger font size for stop icon too
         self.record_btn.setStyleSheet("font-size: 14px;")
+
+        # Start elapsed time tracking
+        self._record_start_dt = datetime.now()
+        # Keep the container shape, just update text color/weight while recording.
+        self.elapsed_label.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #c62828;"
+            "border-radius: 16px;"
+            "background-color: rgba(198,40,40,0.08);"
+            "border: 1px solid #c62828;"
+        )
+        self.elapsed_label.setText("00:00.0")
+        self._record_time_timer.start(100)
         
         # Start pulsing animation
         self._pulse_alpha = 0.0
@@ -2060,17 +2127,37 @@ class RecordingPanel(QWidget):
         self._pulse_timer.start(50)  # Update every 50ms for smooth animation
         self._update_pulse()
     
-    def _stop_recording(self):
-        """Stop recording data."""
+    def _stop_recording(self, reason: str = "user"):
+        """Stop recording data and prompt to save CSV."""
         self._is_recording = False
-        self.record_btn.setText("▶")
+        self._record_time_timer.stop()
+        if self.data_engine:
+            self.data_engine.stop_recording()
+
+        # Freeze the final elapsed time
+        if self._record_start_dt is not None:
+            self._update_record_time_label(force_show_final=True)
+        self._record_start_dt = None
+
+        self.record_btn.setText("●")
         self.record_btn.setToolTip("Start Recording")
-        # Keep the bigger font size for play icon
-        self.record_btn.setStyleSheet("font-size: 14px;")
+        self.record_btn.setStyleSheet("font-size: 16px; color: #c62828; padding-bottom: 6px;")
         
         # Stop pulsing animation
         self._pulse_timer.stop()
         self._reset_button_style()
+
+        # Immediately open file dialog to save the recording.
+        # reason is currently informational; both user stop and disconnect stop behave the same.
+        self._export_data()
+        # After saving (or cancel), reset the timer display for next recording.
+        self.elapsed_label.setStyleSheet(
+            "font-size: 12px; font-weight: 600; color: #6b6b6b;"
+            "border-radius: 16px;"
+            "background-color: rgba(0, 0, 0, 0.06);"
+            "border: 1px solid #444;"
+        )
+        self.elapsed_label.setText("00:00.0")
     
     def _update_pulse(self):
         """Update pulsing animation."""
@@ -2114,109 +2201,129 @@ class RecordingPanel(QWidget):
         """)
     
     def _reset_button_style(self):
-        """Reset button to default style but keep font size."""
-        self.record_btn.setStyleSheet("font-size: 14px;")
+        """Reset button to default style (red circle record icon)."""
+        self.record_btn.setStyleSheet("font-size: 16px; color: #c62828; padding-bottom: 6px;")
+
+    def _update_record_time_label(self, force_show_final: bool = False):
+        """Update elapsed time label while recording."""
+        if not self._record_start_dt:
+            return
+        elapsed = (datetime.now() - self._record_start_dt).total_seconds()
+        if elapsed < 0:
+            elapsed = 0.0
+        minutes = int(elapsed // 60)
+        seconds = elapsed - (minutes * 60)
+        # mm:ss.t
+        self.elapsed_label.setText(f"{minutes:02d}:{seconds:04.1f}")
     
     def update_recording(self):
         """Update recording with current data from registers and variables."""
-        if not self._is_recording:
-            return
-        
-        import time
-        now = time.time()
-        
-        # Record selected registers
-        for designator in self._selected_registers:
-            # Find register by designator
-            reg = next((r for r in self.registers if r.designator == designator), None)
-            if reg and reg.scaled_value is not None:
-                self._recorded_data[designator].append((now, reg.scaled_value))
-        
-        # Record selected variables
-        for designator in self._selected_variables:
-            # Find variable by designator
-            var = next((v for v in self.variables if v.designator == designator), None)
-            if var and var.value is not None:
-                self._recorded_data[designator].append((now, var.value))
+        # Recording is handled inside DataEngine at poll speed.
+        return
     
     def _export_data(self):
-        """Export recorded data to CSV."""
-        if not self._recorded_data or all(len(data) == 0 for data in self._recorded_data.values()):
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "No Data", "No recorded data to export.")
+        """Save recorded data to CSV. Format: TIME column + one column per channel (designator as header)."""
+        if self._export_in_progress:
             return
-        
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Recorded Data",
-            f"modbus_recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "CSV Files (*.csv);;All Files (*)"
-        )
-        
-        if not file_path:
-            return
-        
+        self._export_in_progress = True
+
+        from PySide6.QtWidgets import QMessageBox
+
         try:
+            if not self.data_engine:
+                QMessageBox.warning(self, "No Data Engine", "No recording data available.")
+                return
+
+            recorded_data = self.data_engine.get_recorded_data_copy() or {}
+
+            # Remember last export folder
+            settings = QSettings("ModbusViewer", "ModbusViewer")
+            last_dir = settings.value("RecordingPanel/lastExportDir", "", type=str)
+            default_name = f"modbus_recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            if last_dir and os.path.isdir(last_dir):
+                initial_path = os.path.join(last_dir, default_name)
+            else:
+                initial_path = default_name
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Recording to CSV",
+                initial_path,
+                "CSV Files (*.csv);;All Files (*)"
+            )
+
+            if not file_path:
+                return
+
+            # Save folder for next time
+            export_dir = os.path.dirname(file_path)
+            if export_dir:
+                settings.setValue("RecordingPanel/lastExportDir", export_dir)
+
             with open(file_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                
-                # Get all designators and their labels
-                designator_labels = {}
+
+                # Map designator -> display name (register label or variable name)
+                designator_to_name = {}
                 for reg in self.registers:
-                    if reg.designator in self._recorded_data:
-                        label = f"D{reg.slave_id}.{reg.label}" if reg.label else reg.designator
-                        designator_labels[reg.designator] = label
-                
+                    if reg.designator in recorded_data:
+                        name = f"D{reg.slave_id}.{reg.label}" if reg.label else reg.designator
+                        designator_to_name[reg.designator] = name
                 for var in self.variables:
-                    if var.designator in self._recorded_data:
-                        label = var.label or var.name
+                    if var.designator in recorded_data:
+                        name = var.label or var.name
                         if not var.is_global and var.slave_id:
-                            label = f"D{var.slave_id}.{label}"
-                        designator_labels[var.designator] = label
-                
-                # Headers - same format as plot export
-                headers = []
-                data_columns = []
-                max_rows = 0
-                
-                # Collect data
-                for designator in sorted(self._recorded_data.keys()):
-                    data = self._recorded_data[designator]
-                    if not data:
-                        continue
-                    
-                    label = designator_labels.get(designator, designator)
-                    headers.extend([f"{label} (Time)", f"{label} (Value)"])
-                    
-                    # Extract timestamps and values
-                    timestamps = []
-                    values = []
-                    for dp in data:
-                        timestamps.append(dp[0])
-                        values.append(dp[1])
-                    
-                    data_columns.append(timestamps)
-                    data_columns.append(values)
-                    max_rows = max(max_rows, len(data))
-                
-                if not headers:
-                    return
-                
+                            name = f"D{var.slave_id}.{name}"
+                        designator_to_name[var.designator] = name
+
+                # Fallback to designator if not found in registers/variables
+                for d in recorded_data:
+                    if d not in designator_to_name:
+                        designator_to_name[d] = d
+
+                # Column order: designators sorted
+                designators = sorted(recorded_data.keys())
+
+                # Headers: TIME + display name per channel (register name / variable name)
+                headers = ["TIME"] + [designator_to_name[d] for d in designators]
                 writer.writerow(headers)
-                
-                # Write rows - same format as plot export
+
+                # Build value columns (list of values per designator)
+                value_columns = []
+                max_rows = 0
+                for designator in designators:
+                    data = recorded_data[designator]
+                    if not data:
+                        value_columns.append([])
+                        continue
+                    values = [dp[1] for dp in data]
+                    value_columns.append(values)
+                    max_rows = max(max_rows, len(data))
+
+                # Time column: use timestamps from the first channel that has data
+                time_column = []
+                for designator in designators:
+                    data = recorded_data[designator]
+                    if data:
+                        time_column = [dp[0] for dp in data]
+                        break
+
+                # If we have no time column (all empty), use row index
+                if not time_column and value_columns:
+                    time_column = list(range(max_rows))
+
+                # Write rows: TIME, then value for each channel
                 for i in range(max_rows):
-                    row = []
-                    for col_idx, col in enumerate(data_columns):
-                        if i < len(col):
-                            if col_idx % 2 == 0:  # Timestamp column
-                                row.append(datetime.fromtimestamp(col[i]).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
-                            else:  # Value column
-                                row.append(str(col[i]))
-                        else:
-                            row.append("")
+                    if i < len(time_column):
+                        time_str = datetime.fromtimestamp(time_column[i]).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    else:
+                        time_str = ""
+                    row = [time_str]
+                    for col in value_columns:
+                        row.append(str(col[i]) if i < len(col) else "")
                     writer.writerow(row)
-                    
+
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
+        finally:
+            self._export_in_progress = False

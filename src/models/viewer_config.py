@@ -69,6 +69,7 @@ class ViewerConfig:
     # Recording settings
     recording_registers: List[str] = field(default_factory=list)
     recording_variables: List[str] = field(default_factory=list)
+    recording_max_speed: bool = False
     
     # Custom Panels
     text_panels: List[dict] = field(default_factory=list)
@@ -108,6 +109,7 @@ class ViewerConfig:
             "plot_y_max": self.plot_y_max,
             "recording_registers": self.recording_registers,
             "recording_variables": self.recording_variables,
+            "recording_max_speed": self.recording_max_speed,
             "text_panels": self.text_panels,
             "image_panels": self.image_panels,
         }
@@ -147,6 +149,7 @@ class ViewerConfig:
             plot_y_max=data.get("plot_y_max", 100.0),
             recording_registers=data.get("recording_registers", []),
             recording_variables=data.get("recording_variables", []),
+            recording_max_speed=data.get("recording_max_speed", False),
             text_panels=data.get("text_panels", []),
             image_panels=data.get("image_panels", []),
         )

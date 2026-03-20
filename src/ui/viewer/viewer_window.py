@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFormLayout, QSizePolicy, QMenu, QDockWidget, QApplication
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QByteArray
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QAction, QIcon
 
 from src.models.project import Project, ConnectionSettings
@@ -84,6 +85,7 @@ class ViewerWindow(QMainWindow):
         self.is_admin = False  # Start as user by default
         self._found_devices = []
         self._connection_lost_dialog_shown = False  # Flag to prevent multiple dialogs
+        self._active_error_dialog = None  # Guard to prevent stacked error dialogs
         
         # Clean devices on startup - User must scan first
         self.config.slave_ids = []
@@ -125,7 +127,10 @@ class ViewerWindow(QMainWindow):
         if not self.config.project_path:
             self._update_device_menu()
         self._update_ui_state()
-        
+
+        # If last used port is available, run scan and auto-connect to last device if found
+        self._maybe_auto_scan_and_connect()
+
         # Status update timer
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self._update_status)
@@ -392,8 +397,39 @@ class ViewerWindow(QMainWindow):
         self.data_engine.connection_lost.connect(self._on_connection_lost)
         self.table_view.visibility_changed.connect(self._on_visibility_changed)
         self.variables_panel.visibility_changed.connect(self._on_visibility_changed)
-        self.bits_panel.visibility_changed.connect(self._on_visibility_changed)
-        self.bits_panel.bit_value_changed.connect(self._on_bit_value_changed)
+        self.bits_panel.visibility_changed.connect(self._on_bit_value_changed)
+        # Clear chart must also clear data engine history so the plot stays clear
+        try:
+            self.plot_view.clear_btn.clicked.disconnect(self.plot_view.clear)
+        except TypeError:
+            pass
+        self.plot_view.clear_btn.clicked.connect(self._on_clear_chart)
+
+    def _on_clear_chart(self):
+        """Clear plot and data engine history so the chart stays clear."""
+        self.data_engine.clear_history()
+        self.plot_view.clear()
+
+    def _show_single_error_dialog(self, title: str, message: str) -> None:
+        """
+        Show at most one modal error dialog at a time.
+        This prevents repeated error signals from stacking QMessageBoxes.
+        """
+        try:
+            if self._active_error_dialog is not None and self._active_error_dialog.isVisible():
+                return
+        except RuntimeError:
+            # Dialog was already deleted.
+            self._active_error_dialog = None
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        self._active_error_dialog = msg
+        msg.exec()
+        self._active_error_dialog = None
 
     def _on_visibility_changed(self):
         """Update live registers and sync tabs when visibility toggles."""
@@ -414,7 +450,7 @@ class ViewerWindow(QMainWindow):
                 self.modbus.write_register(slave_id, addr, value)
                 self.statusbar.showMessage(f"Bit updated in D{slave_id}.R{addr}", 3000)
             except Exception as e:
-                QMessageBox.critical(self, "Write Error", str(e))
+                self._show_single_error_dialog("Write Error", str(e))
                 self.bits_panel.clear_pending(slave_id, addr)
 
     def _refresh_ports(self):
@@ -428,6 +464,56 @@ class ViewerWindow(QMainWindow):
             index = self.port_combo.findData(target_port)
             if index >= 0:
                 self.port_combo.setCurrentIndex(index)
+
+    def _maybe_auto_scan_and_connect(self):
+        """If last used COM port is available, run scan and auto-connect to last device if found."""
+        # Only auto-scan when we actually have a saved port and it was selected (i.e. it's available)
+        if not self.config.port:
+            return
+        port = self.port_combo.currentData()
+        if port != self.config.port:
+            return
+        settings = QSettings("ModbusViewer", "ModbusViewer")
+        raw = settings.value("ViewerWindow/lastUsedSlaveIds")
+        last_slave_ids = []
+        if raw is not None and isinstance(raw, (list, tuple)):
+            try:
+                last_slave_ids = [int(x) for x in raw]
+            except (TypeError, ValueError):
+                pass
+        # Run scan after a short delay so the window is shown
+        QTimer.singleShot(300, lambda: self._run_auto_scan_and_connect(port, last_slave_ids))
+
+    def _run_auto_scan_and_connect(self, port, last_slave_ids):
+        """Run scan dialog; when done, select last used device if found and connect."""
+        dialog = MinimalScanDialog(
+            parent=self,
+            port=port,
+            baud=self.config.baud_rate,
+            parity=self.config.parity,
+            stop_bits=self.config.stop_bits,
+            timeout=self.config.scan_timeout,
+            limit=self.config.scan_slave_limit
+        )
+
+        def on_devices_found(ids):
+            self._found_devices = ids
+            if last_slave_ids:
+                intersection = [s for s in last_slave_ids if s in ids]
+                if intersection:
+                    self.config.slave_ids = intersection
+                else:
+                    self.config.slave_ids = ids
+            else:
+                self.config.slave_ids = ids
+            self.config.save()
+            self._update_device_menu()
+
+        dialog.devices_found.connect(on_devices_found)
+        dialog.exec()
+        if self.config.slave_ids and self.connect_action.isEnabled():
+            self._connect()
+            self.connect_action.setChecked(True)
 
     def _on_device_menu_about_to_hide(self):
         """Called when device menu is about to hide - sync selected devices."""
@@ -581,6 +667,11 @@ class ViewerWindow(QMainWindow):
             self.connection_label.setText(f'<span style="color: {COLORS["success"]};">●</span> Connected: {port}')
             self.connection_label.setStyleSheet("font-weight: 500;")
             self._connection_lost_dialog_shown = False  # Reset flag on successful connection
+            # Remember last used port and device(s) for next launch
+            self.config.port = port
+            self.config.save()
+            settings = QSettings("ModbusViewer", "ModbusViewer")
+            settings.setValue("ViewerWindow/lastUsedSlaveIds", slave_ids)
             self._sync_registers()
             self.data_engine.start()
             # Update recording panel connection state
@@ -839,7 +930,6 @@ class ViewerWindow(QMainWindow):
         self.variables_panel.update_values()
         self.bits_panel.update_values()
         self.plot_view.update_plot(self.data_engine)
-        self.recording_panel.update_recording()
 
     def _on_error(self, msg):
         self.statusbar.showMessage(f"Error: {msg}", 5000)

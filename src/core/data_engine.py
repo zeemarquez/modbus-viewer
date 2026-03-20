@@ -72,6 +72,15 @@ class DataEngine(QObject):
         self._device_batches: Dict[int, Dict[str, List[Tuple[int, int, List[Register]]]]] = {}
         self._last_slow_poll_time = 0.0
         self._slow_poll_interval = 0.5  # 500ms for slow registers
+
+        # Recording state (handled in poll thread for max speed)
+        self._recording_enabled = False
+        self._recording_max_speed = False
+        self._recording_register_designators: set[str] = set()
+        self._recording_variable_designators: set[str] = set()
+        self._recording_registers: List[Register] = []
+        self._recording_variables: List[Variable] = []
+        self._recorded_data: Dict[str, List[Tuple[float, float]]] = {}
     
     @property
     def poll_interval(self) -> int:
@@ -109,8 +118,18 @@ class DataEngine(QObject):
         
         # For each device, split into fast and slow, then create batches
         for slave_id, device_regs in by_device.items():
-            fast_regs = [r for r in device_regs if r.fast_poll]
-            slow_regs = [r for r in device_regs if not r.fast_poll]
+            if self._recording_enabled and self._recording_max_speed:
+                fast_regs = [r for r in device_regs if r.designator in self._recording_register_designators]
+                slow_regs = []
+            else:
+                fast_regs = [
+                    r for r in device_regs
+                    if r.fast_poll or r.designator in self._recording_register_designators
+                ]
+                slow_regs = [
+                    r for r in device_regs
+                    if (not r.fast_poll) and (r.designator not in self._recording_register_designators)
+                ]
             
             fast_sorted = sorted(fast_regs, key=lambda r: r.address)
             slow_sorted = sorted(slow_regs, key=lambda r: r.address)
@@ -130,6 +149,49 @@ class DataEngine(QObject):
                 key = var.designator
                 if key not in self._history:
                     self._history[key] = deque()
+
+    def start_recording(
+        self,
+        register_designators: List[str],
+        variable_designators: List[str],
+        max_speed: bool = False,
+    ) -> None:
+        """Enable max-speed recording for selected registers/variables."""
+        with self._write_lock:
+            self._recording_enabled = True
+            self._recording_max_speed = max_speed
+            self._recording_register_designators = set(register_designators)
+            self._recording_variable_designators = set(variable_designators)
+            self._recording_registers = [r for r in self.registers if r.designator in self._recording_register_designators]
+            self._recording_variables = [v for v in self.variables if v.designator in self._recording_variable_designators]
+            self._recorded_data = {
+                designator: [] for designator in (register_designators + variable_designators)
+            }
+            if self.modbus:
+                self.modbus.set_slave_switch_delay(0.0)
+            self._rebuild_batches()
+
+    def stop_recording(self) -> None:
+        """Disable recording while keeping collected samples."""
+        with self._write_lock:
+            self._recording_enabled = False
+            self._recording_max_speed = False
+            self._recording_register_designators.clear()
+            self._recording_variable_designators.clear()
+            self._recording_registers = []
+            self._recording_variables = []
+            if self.modbus:
+                self.modbus.set_slave_switch_delay(0.01)
+            self._rebuild_batches()
+
+    @property
+    def is_recording(self) -> bool:
+        return self._recording_enabled
+
+    def get_recorded_data_copy(self) -> Dict[str, List[Tuple[float, float]]]:
+        """Return a copy of recorded data for export."""
+        with self._write_lock:
+            return {k: list(v) for k, v in self._recorded_data.items()}
     
     def start(self) -> None:
         """Start polling thread."""
@@ -153,6 +215,7 @@ class DataEngine(QObject):
         """Background thread loop for fast polling."""
         last_gui_update = 0
         GUI_UPDATE_INTERVAL = 0.033  # ~30 FPS limit for GUI updates
+        GUI_UPDATE_INTERVAL_RECORDING = 0.2  # Slow UI updates to favor polling
         
         while not self._stop_event.is_set():
             loop_start = time.perf_counter()
@@ -163,15 +226,16 @@ class DataEngine(QObject):
                 duration = (time.perf_counter() - loop_start) * 1000
                 self._last_poll_duration = duration
                 
-                # Throttle GUI updates to ~30 FPS to save CPU and keep UI responsive
+                # Throttle GUI updates to save CPU and keep UI responsive
                 now = time.time()
-                if now - last_gui_update >= GUI_UPDATE_INTERVAL:
+                update_interval = GUI_UPDATE_INTERVAL_RECORDING if self._recording_enabled else GUI_UPDATE_INTERVAL
+                if now - last_gui_update >= update_interval:
                     self.data_updated.emit()
                     last_gui_update = now
             
             # Minimal sleep to allow serial bus turnaround (Modbus RTU silent interval)
-            # Even at high speed, most devices need 2-5ms to reset their state machine
-            time.sleep(0.005)
+            # Yield while recording to maximize sampling speed.
+            time.sleep(0 if self._recording_max_speed else (0.001 if self._recording_enabled else 0.005))
     
     def _poll(self) -> bool:
         """Single poll cycle - polls all devices."""
@@ -184,7 +248,7 @@ class DataEngine(QObject):
         self._last_poll_time = now
         self._poll_count += 1
         
-        poll_slow = now - self._last_slow_poll_time >= self._slow_poll_interval
+        poll_slow = (not self._recording_enabled) and (now - self._last_slow_poll_time >= self._slow_poll_interval)
         if poll_slow:
             self._last_slow_poll_time = now
         
@@ -207,15 +271,21 @@ class DataEngine(QObject):
                         self._error_count += 1
                 
                 # Evaluate variables
-                for variable in self.variables:
+                variables_to_eval = self._recording_variables if self._recording_enabled else self.variables
+                for variable in variables_to_eval:
                     try:
                         value = self.variable_evaluator.evaluate(variable.expression)
                         variable.value = value
                         variable.error = None
-                        self._append_history(variable.designator, value, now)
+                        if not self._recording_max_speed:
+                            self._append_history(variable.designator, value, now)
                     except Exception as e:
                         variable.value = None
                         variable.error = str(e)
+
+                # Record samples at poll speed
+                if self._recording_enabled:
+                    self._append_recording_samples(now)
         except Exception as e:
             # If we get here, it's a critical serial error from _poll_device_batches
             self._is_running = False
@@ -293,7 +363,8 @@ class DataEngine(QObject):
                     reg.scaled_value = reg.apply_scale(float_val)
                 else:
                     reg.scaled_value = reg.apply_scale(raw_val)
-                self._append_history(reg.designator, reg.scaled_value, now)
+                if not self._recording_max_speed:
+                    self._append_history(reg.designator, reg.scaled_value, now)
             except Exception as e:
                 reg.error = str(e)
 
@@ -330,6 +401,15 @@ class DataEngine(QObject):
         # Add last group
         groups.append((current_start, current_end - current_start, current_group_regs))
         return groups
+
+    def _append_recording_samples(self, now: float) -> None:
+        """Append current values for selected items."""
+        for reg in self._recording_registers:
+            if reg.scaled_value is not None and reg.designator in self._recorded_data:
+                self._recorded_data[reg.designator].append((now, reg.scaled_value))
+        for var in self._recording_variables:
+            if var.value is not None and var.designator in self._recorded_data:
+                self._recorded_data[var.designator].append((now, var.value))
 
     def _append_history(self, key: str, value: float, timestamp: float) -> None:
         """Append value to history buffer."""

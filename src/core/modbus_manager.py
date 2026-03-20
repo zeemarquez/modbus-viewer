@@ -19,6 +19,7 @@ class ModbusManager:
         self.slave_ids: List[int] = []  # List of connected slave IDs
         self.is_connected: bool = False
         self._current_slave_id: int = 1  # Currently active slave ID
+        self._slave_switch_delay = 0.01
     
     def connect(
         self,
@@ -98,7 +99,12 @@ class ModbusManager:
             self._current_slave_id = slave_id
             # Small delay after switching slave ID to allow RS485 bus to settle
             import time
-            time.sleep(0.01)  # 10ms
+            if self._slave_switch_delay > 0:
+                time.sleep(self._slave_switch_delay)
+
+    def set_slave_switch_delay(self, delay_seconds: float) -> None:
+        """Set delay after switching slave IDs (0 disables)."""
+        self._slave_switch_delay = max(0.0, float(delay_seconds))
     
     def read_registers(self, slave_id: int, address: int, count: int) -> List[int]:
         """

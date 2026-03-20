@@ -38,9 +38,11 @@ class CalibrationDialog(QDialog):
         self.modbus = modbus
         self.data_engine = data_engine
         self.slave_id = slave_id
-        self.current_point = 0  # 0 = First point, 1 = Second point
+        # 0 = Point 1, 1 = Point 2 (mapped to device command suffix)
+        self.selected_point = 0
         self.current_channel = 1
         self.bit3_seen_high = False  # Track if we've seen bit 3 go to 1 (calibration started)
+        self._active_error_dialog = None  # Guard to prevent stacked calibration error dialogs
         
         self.setWindowTitle("Sensor Calibration")
         self.setMinimumWidth(250)
@@ -60,6 +62,23 @@ class CalibrationDialog(QDialog):
         
         self._setup_ui()
         self._update_ui()
+
+    def _show_single_modal_dialog(self, title: str, message: str, icon: QMessageBox.Icon) -> None:
+        """Show at most one modal dialog at a time for this calibration dialog."""
+        try:
+            if self._active_error_dialog is not None and self._active_error_dialog.isVisible():
+                return
+        except RuntimeError:
+            self._active_error_dialog = None
+
+        msg = QMessageBox(self)
+        msg.setIcon(icon)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        self._active_error_dialog = msg
+        msg.exec()
+        self._active_error_dialog = None
     
     def _setup_ui(self):
         """Setup the dialog UI."""
@@ -83,6 +102,19 @@ class CalibrationDialog(QDialog):
         channel_layout.addWidget(self.channel_combo)
         channel_layout.addStretch()
         layout.addLayout(channel_layout)
+
+        # Point selector (Point 1 / Point 2)
+        point_layout = QHBoxLayout()
+        point_label = QLabel("Point:")
+        point_label.setFixedWidth(max_label_width)
+        point_layout.addWidget(point_label)
+        self.point_combo = QComboBox()
+        self.point_combo.addItems(["Point 1", "Point 2"])
+        self.point_combo.setCurrentIndex(0)
+        self.point_combo.currentIndexChanged.connect(self._on_point_changed)
+        point_layout.addWidget(self.point_combo)
+        point_layout.addStretch()
+        layout.addLayout(point_layout)
         
         # Reference value input
         value_layout = QHBoxLayout()
@@ -104,12 +136,15 @@ class CalibrationDialog(QDialog):
         self.value_input.setMaximumWidth(input_width)
         self.channel_combo.setMinimumWidth(input_width)
         self.channel_combo.setMaximumWidth(input_width)
+        self.point_combo.setMinimumWidth(input_width)
+        self.point_combo.setMaximumWidth(input_width)
         # Use Preferred policy so they don't expand beyond their preferred size
         self.value_input.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.channel_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.point_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         
         # Calibrate button
-        self.calibrate_btn = QPushButton("Calibrate First Point")
+        self.calibrate_btn = QPushButton("Calibrate Selected Point")
         self.calibrate_btn.setMinimumHeight(40)
         font = QFont()
         font.setBold(True)
@@ -135,27 +170,26 @@ class CalibrationDialog(QDialog):
     def _on_channel_changed(self, index):
         """Handle channel selection change."""
         self.current_channel = index + 1
-        # Reset to first point when channel changes
-        self.current_point = 0
+        self._update_ui()
+
+    def _on_point_changed(self, index: int):
+        """Handle point selection change (Point 1 or Point 2)."""
+        self.selected_point = index
         self._update_ui()
     
     def _update_ui(self):
         """Update UI based on current state."""
-        if self.current_point == 0:
+        point_num = 1 if self.selected_point == 0 else 2
+        if self.selected_point == 0:
             self.value_label.setText("Point 1 output:")
             self.value_input.setValue(0.0)  # Default for point 1
-            self.calibrate_btn.setText("Calibrate First Point")
-            self.status_label.setText("")
-        elif self.current_point == 1:
+        else:
             self.value_label.setText("Point 2 output:")
             self.value_input.setValue(100.0)  # Default for point 2
-            self.calibrate_btn.setText("Calibrate Second Point")
-            self.status_label.setText("")
-        else:
-            # Finished
-            self.value_label.setText("Point 2 output:")
-            self.calibrate_btn.setEnabled(False)
-            self.status_label.setText("")
+
+        self.calibrate_btn.setText(f"Calibrate Point {point_num}")
+        # Clear status when updating selection (prevents stale messages)
+        self.status_label.setText("")
     
     def _get_command_code(self, channel: int, point: int) -> int:
         """Get the command code for the given channel and point."""
@@ -164,7 +198,8 @@ class CalibrationDialog(QDialog):
     
     def _on_calibrate_clicked(self):
         """Handle calibrate button click."""
-        print(f"[CALIB] Calibrate button clicked - Channel {self.current_channel}, Point {self.current_point}")
+        point_num = 1 if self.selected_point == 0 else 2
+        print(f"[CALIB] Calibrate button clicked - Channel {self.current_channel}, Point {point_num}")
         
         if not self.modbus.is_connected:
             print("[CALIB] ERROR: Modbus not connected")
@@ -188,6 +223,7 @@ class CalibrationDialog(QDialog):
             # Disable controls during calibration
             self.calibrate_btn.setEnabled(False)
             self.channel_combo.setEnabled(False)
+            self.point_combo.setEnabled(False)
             self.value_input.setEnabled(False)
             self.progress_bar.setVisible(True)
             self.status_label.setText("Writing calibration value...")
@@ -200,7 +236,11 @@ class CalibrationDialog(QDialog):
             
         except Exception as e:
             self._reset_ui()
-            QMessageBox.critical(self, "Calibration Error", f"Failed to start calibration:\n{str(e)}")
+            self._show_single_modal_dialog(
+                "Calibration Error",
+                f"Failed to start calibration:\n{str(e)}",
+                QMessageBox.Icon.Critical,
+            )
     
     def _write_calibration_value(self, reference_value):
         """Write the calibration value (called after delay)."""
@@ -243,12 +283,16 @@ class CalibrationDialog(QDialog):
             print(f"[CALIB] Traceback: {traceback.format_exc()}")
             self._reset_ui()
             error_msg = f"Failed to write calibration value to register {self.REG_CALIBRATION_VALUE}:\n{str(e)}"
-            QMessageBox.critical(self, "Calibration Error", error_msg)
+            self._show_single_modal_dialog(
+                "Calibration Error",
+                error_msg,
+                QMessageBox.Icon.Critical,
+            )
     
     def _send_calibration_command(self):
         """Send the calibration command after the delay."""
         try:
-            command_code = self._get_command_code(self.current_channel, self.current_point)
+            command_code = self._get_command_code(self.current_channel, self.selected_point)
             print(f"[CALIB] Writing calibration command: {command_code} to register {self.REG_CALIBRATION_CMD}")
             
             if not self.modbus.is_connected or not self.modbus.instrument:
@@ -291,7 +335,11 @@ class CalibrationDialog(QDialog):
             print(f"[CALIB] Traceback: {traceback.format_exc()}")
             self._reset_ui()
             error_msg = f"Failed to write calibration command to register {self.REG_CALIBRATION_CMD}:\n{str(e)}"
-            QMessageBox.critical(self, "Calibration Error", error_msg)
+            self._show_single_modal_dialog(
+                "Calibration Error",
+                error_msg,
+                QMessageBox.Icon.Critical,
+            )
     
     
     def _check_calibration_status(self):
@@ -314,11 +362,11 @@ class CalibrationDialog(QDialog):
                     self.status_timer.stop()
                     self.timeout_timer.stop()
                     self._reset_ui()
-                    QMessageBox.warning(
-                        self,
+                    self._show_single_modal_dialog(
                         "Status Read Error",
                         f"Could not read calibration status from device after {self.status_check_count} attempts.\n\n"
-                        "Please check the connection and try again."
+                        "Please check the connection and try again.",
+                        QMessageBox.Icon.Warning,
                     )
                 return  # Skip this check, try again next time
             
@@ -361,31 +409,24 @@ class CalibrationDialog(QDialog):
     def _on_calibration_complete(self):
         """Handle calibration completion."""
         self.progress_bar.setVisible(False)
-        
-        if self.current_point == 0:
-            # First point done, move to second point (no popup)
-            self.current_point = 1
-            self._update_ui()
-            self._reset_ui()
-        else:
-            # Second point done, calibration complete
-            self.current_point = 2
-            self._update_ui()
-            self._reset_ui()
-            # Show simple completion message
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("Calibration Complete")
-            msg.setText(f"Channel {self.current_channel} calibration complete.")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg.exec()  # Wait for user to click OK
-            # Close calibration dialog after message box is dismissed
-            self.accept()
+
+        # Re-enable controls, but keep the dialog open so the user can calibrate the other point.
+        self._reset_ui()
+        point_num = 1 if self.selected_point == 0 else 2
+        self.status_label.setText("")
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Calibration Complete")
+        msg.setText(f"Channel {self.current_channel} - Point {point_num} calibration complete.")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()  # Wait for user to click OK
     
     def _reset_ui(self):
         """Reset UI controls to enabled state."""
         self.calibrate_btn.setEnabled(True)
         self.channel_combo.setEnabled(True)
+        self.point_combo.setEnabled(True)
         self.value_input.setEnabled(True)
         self.progress_bar.setVisible(False)
     
@@ -393,11 +434,10 @@ class CalibrationDialog(QDialog):
         """Handle calibration timeout."""
         self.status_timer.stop()
         self._reset_ui()
-        QMessageBox.warning(
-            self,
+        self._show_single_modal_dialog(
             "Calibration Timeout",
-            "Calibration did not complete within 30 seconds.\n"
-            "Please check the device status and try again."
+            "Calibration did not complete within 30 seconds.\nPlease check the device status and try again.",
+            QMessageBox.Icon.Warning,
         )
     
     def closeEvent(self, event):
